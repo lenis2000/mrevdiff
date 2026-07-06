@@ -224,9 +224,11 @@ type Model struct {
 	escCache *pdfEscCache
 	// pageLayout memoises per-page column detection for column-aware crops.
 	pageLayout *pageLayoutCache
-	// prevLayout remembers the layout interrupted by the `|` PDF-only
-	// zoom so the second `|` restores it.
+	// prevLayout/prevFocus remember the layout and focused pane
+	// interrupted by the `|` PDF-only zoom so leaving the zoom restores
+	// both exactly.
 	prevLayout LayoutMode
+	prevFocus  Pane
 
 	ShowHelp bool
 	// CountBuf accumulates digit prefixes for Vim-style diff motions (e.g. "10j").

@@ -450,12 +450,19 @@ func TestPDFOnlyZoomToggle(t *testing.T) {
 	if m.Layout != LayoutStacked {
 		t.Fatalf("second | should restore the interrupted layout, got %v", m.Layout)
 	}
+	if m.Focus != PaneOldSource {
+		t.Fatalf("second | should restore the interrupted focus, got %v", m.Focus)
+	}
 
-	// \ also exits the zoom, back to the interrupted layout.
+	// \ also exits the zoom, back to the interrupted layout and focus.
+	m.Focus = PaneNewSource
 	m = pressKey(t, m, "|")
 	m = pressKey(t, m, "\\")
 	if m.Layout != LayoutStacked {
 		t.Fatalf("\\ inside PDF zoom should restore the interrupted layout, got %v", m.Layout)
+	}
+	if m.Focus != PaneNewSource {
+		t.Fatalf("\\ inside PDF zoom should restore the interrupted focus, got %v", m.Focus)
 	}
 }
 

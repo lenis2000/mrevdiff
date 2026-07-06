@@ -458,7 +458,9 @@ func (m *Model) cycleLayout() {
 	case LayoutNewPDF:
 		m.Layout = LayoutNoPDF
 	case LayoutPDFOnly:
-		m.Layout = m.prevLayout
+		m.exitPDFOnly()
+		m.Status = "layout: " + layoutName(m.Layout)
+		return
 	default: // LayoutNoPDF
 		m.Layout = LayoutThreeCol
 	}
@@ -467,18 +469,27 @@ func (m *Model) cycleLayout() {
 }
 
 // togglePDFOnly zooms the PDF pane to the whole terminal and back,
-// remembering the layout it interrupted.
+// remembering the layout and the focused pane it interrupted.
 func (m *Model) togglePDFOnly() {
 	if m.Layout == LayoutPDFOnly {
-		m.Layout = m.prevLayout
-		m.snapFocusToLayout()
+		m.exitPDFOnly()
 		m.Status = "layout: " + layoutName(m.Layout)
 		return
 	}
 	m.prevLayout = m.Layout
+	m.prevFocus = m.Focus
 	m.Layout = LayoutPDFOnly
 	m.Focus = PanePDF
 	m.Status = "layout: PDF only (| or \\ to restore)"
+}
+
+// exitPDFOnly restores the layout and focus interrupted by the zoom.
+// snapFocusToLayout stays as the safety net in case the remembered pane
+// is not part of the restored layout.
+func (m *Model) exitPDFOnly() {
+	m.Layout = m.prevLayout
+	m.Focus = m.prevFocus
+	m.snapFocusToLayout()
 }
 
 // snapFocusToLayout moves focus to the new-source pane when the current
