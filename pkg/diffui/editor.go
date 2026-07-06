@@ -45,6 +45,22 @@ func (m Model) editInExternalEditor() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	argv := append(append([]string{}, userArgs...), buildDiffEditorLineArgs(head, m.Review.New.Path, line)...)
+	// Inside agterm, run the editor in an overlay on top of this session
+	// instead of suspending the TUI: the kitty PDF frame stays painted and
+	// the review is visible the moment the editor closes.
+	if agtermAvailable() {
+		parts := make([]string, 0, len(argv)+1)
+		parts = append(parts, shellQuoteArg(head))
+		for _, a := range argv {
+			parts = append(parts, shellQuoteArg(a))
+		}
+		shellCmd := strings.Join(parts, " ")
+		dir := filepath.Dir(m.Review.New.Path)
+		m.Status = "editing in agterm overlay…"
+		return m, func() tea.Msg {
+			return diffEditFinishedMsg{err: agtermOverlayEdit(shellCmd, dir)}
+		}
+	}
 	cmd := exec.Command(head, argv...)
 	var ttyFile *os.File
 	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {

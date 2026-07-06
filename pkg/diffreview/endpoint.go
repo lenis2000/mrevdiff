@@ -45,6 +45,11 @@ type Endpoint struct {
 	Editable     bool
 	Source       []byte
 	Materialized bool
+	// ResolvedSHA pins the commit a symbolic rev (HEAD, branch) pointed at
+	// when the review started. In an agent loop HEAD moves within the
+	// hour, so history files and emitted output would otherwise be
+	// ambiguous about what the diff was against. Empty for working files.
+	ResolvedSHA string
 }
 
 // Resolver resolves working-tree and git-object endpoints for diff review.
@@ -221,7 +226,20 @@ func (r Resolver) resolveGitBlobInRepo(ctx context.Context, repoRoot, spec, rev,
 		Editable:     false,
 		Source:       source,
 		Materialized: true,
+		ResolvedSHA:  gitResolveCommit(ctx, repoRoot, rev),
 	}, nil
+}
+
+// gitResolveCommit resolves a rev to its commit SHA, best-effort: an empty
+// result just means the emitted output carries no pin.
+func gitResolveCommit(ctx context.Context, repoRoot, rev string) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--end-of-options", rev+"^{commit}")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (r Resolver) materializeWorkingSnapshot(endpoint Endpoint) (Endpoint, error) {
@@ -265,7 +283,42 @@ func (r Resolver) sessionID() string {
 	if strings.TrimSpace(r.SessionID) != "" {
 		return safePathComponent(r.SessionID)
 	}
+	return NewSessionID()
+}
+
+// NewSessionID returns a fresh timestamped session ID. The cmd layer
+// creates one Resolver-wide ID so a single run materializes every blob
+// under one .mrevdiff/session-* directory instead of scattering them
+// across per-materialization timestamps.
+func NewSessionID() string {
 	return "session-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+}
+
+// SweepStaleSessions removes .mrevdiff/session-* directories older than
+// maxAge under root. Materialized blobs are per-run scratch (they exist so
+// external compare editors can open the old side), but nothing used to
+// delete them, so every review leaked a directory into the paper repo
+// forever. Best-effort: errors are ignored.
+func SweepStaleSessions(root string, maxAge time.Duration) {
+	if root == "" {
+		return
+	}
+	base := filepath.Join(root, ".mrevdiff")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "session-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(base, e.Name()))
+	}
 }
 
 func absFrom(workDir, path string) (string, error) {
@@ -373,6 +426,12 @@ func writeMaterializedFile(root, target string, data []byte) error {
 	dir := filepath.Dir(target)
 	if err := ensureDirNoSymlinks(root, dir, 0o700); err != nil {
 		return err
+	}
+	// Keep .mrevdiff out of git status in the paper repo. Best-effort and
+	// only when absent, so a user-managed .gitignore is never clobbered.
+	gi := filepath.Join(baseDir, ".gitignore")
+	if _, err := os.Lstat(gi); errors.Is(err, os.ErrNotExist) {
+		_ = os.WriteFile(gi, []byte("*\n"), 0o644)
 	}
 	if info, err := os.Lstat(target); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {

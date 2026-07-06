@@ -56,6 +56,10 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | `S` | Skim forward-search at current line (never compiles) |
 | `P` | open new PDF in Preview |
 | `C` | open old+new in external compare editor |
+| `x` | blink comparator: flip the PDF pane between old and new builds (compiles the old side once, cached) |
+| `/`, `n/N` | search pairs (source text, labels, pair IDs; respects the filter) |
+| `@` | annotation list — enter jumps, `d` deletes |
+| `i` | review scope popup (+ `--description` prose from an agent) |
 | `[` / `]` | select previous/next source line (PDF anchor) |
 | `h/l`, arrows | focus pane |
 | `<` / `>` | resize focused pane / source split |
@@ -96,6 +100,29 @@ The PDF pane ports the fast-rendering work from
   are unaffected. Blocks whose lines carry no SyncTeX records (e.g.
   boxed front-matter like `\significancestatement`) anchor to the
   nearest mapped line instead of showing a dead placeholder.
+- **Region marker** — an amber outline inside every crop marks the exact
+  SyncTeX region of the cursor block, so the eye lands on the changed
+  lines instead of hunting through the context.
+- **Blink comparator (`x`)** — the old endpoint compiles once into a
+  content-addressed cache (`.mrevdiff/oldpdf-<hash>/`, reused across
+  sessions) and `x` flips the pane between old and new renders at
+  identical geometry; a changed subscript or shifted equation pops out
+  the way a moving star pops out of a blink comparator.
+
+## agterm integration
+
+When mrevdiff runs inside [agterm](https://github.com/umputun/agterm)
+(`AGTERM_ENABLED=1` and `agtermctl` on PATH), two hooks activate:
+
+- **Session flag** — the session is flagged in agterm's flagged
+  working-set view whenever the review carries pending annotations or the
+  last rebuild failed, and unflagged when neither holds (and on quit).
+  The sidebar becomes a "reviews that need me" list.
+- **Overlay editing** — `E` opens `$EDITOR` in an agterm overlay on top
+  of the session instead of suspending the TUI, so the PDF frame stays
+  painted and the review is visible the moment the editor closes.
+
+`MREVDIFF_AGTERM=0` disables both. Everywhere else they are no-ops.
 
 ## PDF build awareness
 

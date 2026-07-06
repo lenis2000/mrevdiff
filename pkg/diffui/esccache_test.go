@@ -11,19 +11,19 @@ import (
 
 func TestDiffPDFRenderKeyDistinguishesGeometryAndGeneration(t *testing.T) {
 	b := &parser.Block{ID: "blk"}
-	base := diffPDFRenderKey(b, 1, 80, 40, 9.0, 18.0)
+	base := diffPDFRenderKey("n", b, 1, 80, 40, 9.0, 18.0)
 	cases := map[string]string{
-		"reload generation": diffPDFRenderKey(b, 2, 80, 40, 9.0, 18.0),
-		"pane width":        diffPDFRenderKey(b, 1, 81, 40, 9.0, 18.0),
-		"cell size":         diffPDFRenderKey(b, 1, 80, 40, 10.0, 18.0),
-		"block":             diffPDFRenderKey(&parser.Block{ID: "other"}, 1, 80, 40, 9.0, 18.0),
+		"reload generation": diffPDFRenderKey("n", b, 2, 80, 40, 9.0, 18.0),
+		"pane width":        diffPDFRenderKey("n", b, 1, 81, 40, 9.0, 18.0),
+		"cell size":         diffPDFRenderKey("n", b, 1, 80, 40, 10.0, 18.0),
+		"block":             diffPDFRenderKey("n", &parser.Block{ID: "other"}, 1, 80, 40, 9.0, 18.0),
 	}
 	for name, got := range cases {
 		if got == base {
 			t.Fatalf("key must change with %s", name)
 		}
 	}
-	if again := diffPDFRenderKey(b, 1, 80, 40, 9.0, 18.0); again != base {
+	if again := diffPDFRenderKey("n", b, 1, 80, 40, 9.0, 18.0); again != base {
 		t.Fatalf("key must be deterministic: %q vs %q", again, base)
 	}
 }

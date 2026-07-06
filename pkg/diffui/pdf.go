@@ -21,6 +21,7 @@ import (
 const (
 	diffPDFRenderDebounce = 30 * time.Millisecond
 	deletedPDFPlaceholder = "(deleted block — no new PDF location)"
+	addedPDFPlaceholder   = "(added block — no old PDF location)"
 )
 
 // PDFOptions controls startup PDF preparation for diff mode.
@@ -55,9 +56,12 @@ type diffPDFReloadMsg struct {
 	NewSyncTeX *synctex.Index
 	Status     string
 	BuildStale bool
-	OldPDF     *pdf.Doc
-	Aux        map[string]parser.AuxEntry
-	BBL        []parser.BibEntry
+	// Failed marks an actual rebuild failure (latexmk error, lmkf error or
+	// timeout) as opposed to BuildStale's transient "rebuild in progress".
+	Failed bool
+	OldPDF *pdf.Doc
+	Aux    map[string]parser.AuxEntry
+	BBL    []parser.BibEntry
 }
 
 type diffPDFRenderInputs struct {
@@ -72,6 +76,10 @@ type diffPDFRenderInputs struct {
 	Cache        *pdfEscCache
 	PageLayout   *pageLayoutCache
 	ReloadGen    int
+	// SideKey namespaces frame-cache keys per PDF side ("n" new, "o" old):
+	// an unchanged block has the same ID in both documents but renders
+	// from different PDFs.
+	SideKey string
 }
 
 // PrepareNewPDF builds or opens the new endpoint's existing PDF artifacts.
@@ -161,6 +169,7 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 	res := build.ResolveBuildOutputsOnDisk(path)
 	status := ""
 	buildStale := false
+	failed := false
 	if runBuild {
 		editTime := diffSourceMTime(path)
 		if waitRes, lmkf := ui.AwaitLmkfRebuild(path, editTime, 2*time.Minute); lmkf.Status != ui.LmkfRebuildNotWatching {
@@ -173,9 +182,11 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 			case ui.LmkfRebuildError:
 				status = "lmkf rebuild error — " + lmkf.ErrorLine
 				buildStale = true
+				failed = true
 			default:
 				status = "lmkf didn't finish in time (edit saved anyway)"
 				buildStale = true
+				failed = true
 			}
 		} else {
 			runRes, err := build.RunWith(build.Options{
@@ -187,6 +198,7 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 			}
 			if err != nil {
 				status = "rebuild failed — " + shortDiffBuildWarning(err)
+				failed = true
 				if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
 					buildStale = true
 				}
@@ -224,6 +236,7 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 		NewSyncTeX: idx,
 		Status:     status,
 		BuildStale: buildStale,
+		Failed:     failed,
 		OldPDF:     oldPDF,
 		Aux:        aux,
 		BBL:        bbl,
@@ -270,6 +283,7 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 		}
 	}
 	m.BuildStale = msg.BuildStale
+	m.buildFailed = msg.Failed
 	// The rebuilt document invalidates every cached frame; keep the last
 	// painted frame on screen until the fresh render replaces it.
 	m.escCache.clear()
@@ -297,11 +311,35 @@ func (m Model) withPDFRender() (Model, tea.Cmd) {
 }
 
 func (m *Model) schedulePDFRender() tea.Cmd {
-	if m.BuildStale || m.PDF == nil || m.Synctex == nil || !m.KittyAvailable {
+	if !m.KittyAvailable {
 		return nil
 	}
 	pair := m.CurrentPair()
-	if pair == nil || pair.New == nil {
+	if pair == nil {
+		return nil
+	}
+	// Side selection for the x blink comparator: identical geometry, only
+	// the block/document/index swap.
+	sideKey := "n"
+	block := pair.New
+	var doc *parser.Document
+	if m.Review != nil {
+		doc = m.Review.NewDoc
+	}
+	pdfDoc := m.PDF
+	idx := m.Synctex
+	if m.pdfSide == pdfSideOld && m.OldPDF != nil && m.OldSynctex != nil {
+		sideKey = "o"
+		block = pair.Old
+		if m.Review != nil {
+			doc = m.Review.OldDoc
+		}
+		pdfDoc = m.OldPDF
+		idx = m.OldSynctex
+	} else if m.BuildStale || m.PDF == nil || m.Synctex == nil {
+		return nil
+	}
+	if block == nil {
 		return nil
 	}
 	w, h := m.diffPDFPaneCells()
@@ -312,10 +350,10 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 	m.pdfGen++
 	gen := m.pdfGen
 	inputs := diffPDFRenderInputs{
-		Block:        pair.New,
-		Doc:          m.Review.NewDoc,
-		PDF:          m.PDF,
-		Index:        m.Synctex,
+		Block:        block,
+		Doc:          doc,
+		PDF:          pdfDoc,
+		Index:        idx,
 		WidthCells:   w,
 		HeightCells:  h,
 		CellWidthPx:  cellW,
@@ -323,9 +361,10 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		Cache:        m.escCache,
 		PageLayout:   m.pageLayout,
 		ReloadGen:    m.pdfReloadGen,
+		SideKey:      sideKey,
 	}
-	key := diffPDFRenderKey(pair.New, m.pdfReloadGen, w, h, cellW, cellH)
-	neighbors := m.neighborNewBlocks(pair.ID)
+	key := diffPDFRenderKey(sideKey, block, m.pdfReloadGen, w, h, cellW, cellH)
+	neighbors := m.neighborBlocks(pair.ID, sideKey == "o")
 	// Register the in-flight render synchronously (Update goroutine) so a
 	// quit that races the tick still waits for it in WaitPDFRenders.
 	m.escCache.renderStarted()
@@ -347,9 +386,10 @@ func (m Model) WaitPDFRenders(timeout time.Duration) bool {
 	return m.escCache.drainRenders(timeout)
 }
 
-// neighborNewBlocks returns the new-side blocks of up to two pairs on each
-// side of pairID in review order — the prefetch set for j/k navigation.
-func (m Model) neighborNewBlocks(pairID string) []*parser.Block {
+// neighborBlocks returns the blocks (new side, or old side for the blink
+// comparator) of up to two pairs on each side of pairID in review order —
+// the prefetch set for j/k navigation.
+func (m Model) neighborBlocks(pairID string, oldSide bool) []*parser.Block {
 	if m.Review == nil {
 		return nil
 	}
@@ -364,12 +404,18 @@ func (m Model) neighborNewBlocks(pairID string) []*parser.Block {
 	if cur < 0 {
 		return nil
 	}
+	sideBlock := func(p *diffreview.Pair) *parser.Block {
+		if oldSide {
+			return p.Old
+		}
+		return p.New
+	}
 	var out []*parser.Block
 	appendFrom := func(start, step int) {
 		taken := 0
 		for i := start; i >= 0 && i < len(pairs) && taken < 2; i += step {
-			if pairs[i].New != nil {
-				out = append(out, pairs[i].New)
+			if b := sideBlock(&pairs[i]); b != nil {
+				out = append(out, b)
 				taken++
 			}
 		}
@@ -406,7 +452,14 @@ func (m Model) applyPDFRender(msg diffPDFRenderMsg) (Model, tea.Cmd) {
 
 func (m Model) pdfPaneBody() string {
 	pair := m.CurrentPair()
-	if pair != nil && pair.New == nil {
+	if m.pdfSide == pdfSideOld {
+		if pair != nil && pair.Old == nil {
+			if m.KittyAvailable {
+				return m.kittyClear() + addedPDFPlaceholder
+			}
+			return addedPDFPlaceholder
+		}
+	} else if pair != nil && pair.New == nil {
 		if m.KittyAvailable {
 			return m.kittyClear() + deletedPDFPlaceholder
 		}
@@ -535,10 +588,16 @@ func openDiffPDFPair(res *build.Result) (*pdf.Doc, *synctex.Index, string, bool)
 }
 
 func populateNewPDFRegions(review *diffreview.Review, idx *synctex.Index) {
-	if review == nil || review.NewDoc == nil || idx == nil {
+	if review == nil {
 		return
 	}
-	doc := review.NewDoc
+	populateDocPDFRegions(review.NewDoc, idx)
+}
+
+func populateDocPDFRegions(doc *parser.Document, idx *synctex.Index) {
+	if doc == nil || idx == nil {
+		return
+	}
 	for _, b := range doc.Blocks {
 		if b == nil || b == doc.Root || b.StartLine == 0 {
 			continue

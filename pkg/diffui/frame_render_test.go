@@ -58,7 +58,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			CellWidthPx: 9, CellHeightPx: 18,
 			Cache: cache, ReloadGen: 1,
 		}
-		key := diffPDFRenderKey(block, 1, 40, 20, 9, 18)
+		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18)
 		esc, id, _, status := renderDiffPDFFrame(in, key)
 		if status != "" || esc == "" || id == 0 {
 			t.Fatalf("render failed: esc=%dB id=%d status=%q", len(esc), id, status)
@@ -81,7 +81,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			CellWidthPx: 9, CellHeightPx: 18,
 			Cache: cache, ReloadGen: 1,
 		}
-		key := diffPDFRenderKey(block, 1, 40, 20, 9, 18)
+		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18)
 		esc, id, _, status := renderDiffPDFFrame(in, key)
 		if status != "" || esc == "" || id == 0 {
 			t.Fatalf("render failed: esc=%dB id=%d status=%q", len(esc), id, status)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"math"
 
@@ -45,6 +46,12 @@ type FitOptions struct {
 	// HpadPt is the horizontal padding around a column-cropped region.
 	// Default 20pt when zero.
 	HpadPt float64
+
+	// MarkRegion draws a marker around the exact SyncTeX region inside
+	// the crop: crops deliberately include context (adaptive vpad, full
+	// column width), so without an anchor the eye has to hunt for the
+	// lines that actually correspond to the cursor block.
+	MarkRegion bool
 }
 
 const (
@@ -273,11 +280,83 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	}
 
 	cropped := subImage(img, image.Rect(px0, py0, px1, py1))
+	if opts.MarkRegion {
+		// The region rect in the same pixel space as the (sub)image.
+		regionRect := image.Rect(
+			imgBounds.Min.X+int(r.X*scale),
+			imgBounds.Min.Y+int(r.Y*scale),
+			imgBounds.Min.X+int((r.X+r.W)*scale),
+			imgBounds.Min.Y+int((r.Y+r.H)*scale),
+		)
+		cropped = markRegion(cropped, regionRect, scale)
+	}
 	var buf bytes.Buffer
 	if err := fastPNG.Encode(&buf, cropped); err != nil {
 		return nil, fmt.Errorf("pdf: encode png: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// markRegionColor is the marker ink: amber, readable on both the white
+// page and dark figures without masking the text underneath.
+var markRegionColor = color.RGBA{R: 255, G: 165, B: 0, A: 255}
+
+// markRegion returns a copy of img with an amber outline drawn around
+// regionRect (given in img's own coordinate space, clamped to bounds).
+// It MUST copy: img usually aliases the page pixmap held in the Doc's
+// LRU, and drawing in place would permanently scribble the marker onto
+// the cached page for every later crop.
+func markRegion(img image.Image, regionRect image.Rectangle, scale float64) image.Image {
+	bounds := img.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(dst, dst.Bounds(), img, bounds.Min, draw.Src)
+
+	// A small breathing margin so the outline hugs, not covers, glyph ink;
+	// thickness scales with render DPI so it stays a hairline visually.
+	pad := int(2 * scale)
+	thick := int(scale)
+	if thick < 2 {
+		thick = 2
+	}
+	rect := image.Rect(
+		regionRect.Min.X-bounds.Min.X-pad,
+		regionRect.Min.Y-bounds.Min.Y-pad,
+		regionRect.Max.X-bounds.Min.X+pad,
+		regionRect.Max.Y-bounds.Min.Y+pad,
+	).Intersect(dst.Bounds())
+	if rect.Empty() {
+		return dst
+	}
+	blend := func(x, y int) {
+		c := dst.RGBAAt(x, y)
+		// 70% marker / 30% underlying keeps ink under the line legible.
+		c.R = uint8((int(markRegionColor.R)*7 + int(c.R)*3) / 10)
+		c.G = uint8((int(markRegionColor.G)*7 + int(c.G)*3) / 10)
+		c.B = uint8((int(markRegionColor.B)*7 + int(c.B)*3) / 10)
+		c.A = 255
+		dst.SetRGBA(x, y, c)
+	}
+	for x := rect.Min.X; x < rect.Max.X; x++ {
+		for t := 0; t < thick; t++ {
+			if y := rect.Min.Y + t; y < rect.Max.Y {
+				blend(x, y)
+			}
+			if y := rect.Max.Y - 1 - t; y >= rect.Min.Y {
+				blend(x, y)
+			}
+		}
+	}
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for t := 0; t < thick; t++ {
+			if x := rect.Min.X + t; x < rect.Max.X {
+				blend(x, y)
+			}
+			if x := rect.Max.X - 1 - t; x >= rect.Min.X {
+				blend(x, y)
+			}
+		}
+	}
+	return dst
 }
 
 // subImage returns img cropped to rect, preferring the image type's own

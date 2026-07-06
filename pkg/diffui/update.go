@@ -16,8 +16,23 @@ const (
 	diffJumpUpCount   = 5
 )
 
-// Update implements tea.Model.
+// Update implements tea.Model. It delegates to updateInner and then
+// reconciles the agterm session flag, which mirrors "this review needs
+// attention" (annotations pending / rebuild failed) after any message
+// that may have changed that state.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.updateInner(msg)
+	nm, ok := next.(Model)
+	if !ok {
+		return next, cmd
+	}
+	if flagFn := (&nm).syncAgtermFlag(); flagFn != nil {
+		return nm, tea.Batch(cmd, func() tea.Msg { flagFn(); return nil })
+	}
+	return nm, cmd
+}
+
+func (m Model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.MouseMsg); !ok {
 		m.mouseWheelEdge = mouseWheelEdgeState{}
 	}
@@ -36,6 +51,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyPDFReload(msg)
 	case diffPDFOpenFinishedMsg:
 		return m.applyPDFOpenFinished(msg)
+	case diffOldPDFMsg:
+		return m.applyOldPDF(msg)
 	case diffSkimOpenFinishedMsg:
 		return m.applySkimOpenFinished(msg)
 	case tea.MouseMsg:
@@ -70,6 +87,21 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m.confirmDelete(key == "y" || key == "Y"), nil
+	}
+	// Modal overlays claim the keyboard before global bindings.
+	if m.Search != nil && m.Search.Typing {
+		m.discardArmed = false
+		return m.updateSearchInput(msg)
+	}
+	if m.AnnList != nil {
+		m.discardArmed = false
+		return m.updateAnnList(key)
+	}
+	if m.ShowInfo {
+		m.discardArmed = false
+		m.ShowInfo = false
+		m.Status = ""
+		return m, nil
 	}
 	if key == "ctrl+c" || key == "q" {
 		m.CountBuf = ""
@@ -149,6 +181,19 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openPreviewPDF()
 	case "S", "s":
 		return m.openSkimAtLine()
+	case "x":
+		return m.toggleOldPDF()
+	case "/":
+		return m.startSearch()
+	case "n":
+		return m.nextMatch(1)
+	case "N":
+		return m.nextMatch(-1)
+	case "@":
+		return m.openAnnList()
+	case "i":
+		m.ShowInfo = true
+		return m, nil
 	case "\\":
 		m.cycleLayout()
 		m.PDFImage = ""

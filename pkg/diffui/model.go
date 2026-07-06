@@ -162,6 +162,10 @@ type Options struct {
 	KittyAvailable     bool
 	BuildStale         bool
 	PDFStatus          string
+	// Description is optional markdown prose (from --description or
+	// --description-file) shown in the i info popup — the agent's note to
+	// the returning human about what this review pass changed and why.
+	Description string
 	// KittyXferDir, when non-empty, enables kitty t=f file transmission:
 	// rendered frames are written as PNGs under this directory and the
 	// escape carries only the file path instead of base64 pixel data.
@@ -224,6 +228,23 @@ type Model struct {
 	escCache *pdfEscCache
 	// pageLayout memoises per-page column detection for column-aware crops.
 	pageLayout *pageLayoutCache
+
+	// OldPDF/OldSynctex are the lazily built artifacts of the OLD endpoint
+	// for the x blink comparator. Built once per base (content-addressed
+	// cache under .mrevdiff/oldpdf-<hash>/), opened on first x press.
+	// The cmd layer closes OldPDF after the TUI exits.
+	OldPDF      *pdf.Doc
+	OldSynctex  *synctex.Index
+	pdfSide     int
+	oldPDFState int
+	oldPDFGen   int
+
+	// agtermFlagged tracks the last flag state pushed to agterm so the
+	// reconciler only shells out on transitions; buildFailed records
+	// whether the most recent rebuild actually failed (as opposed to the
+	// transient BuildStale set while a rebuild runs).
+	agtermFlagged bool
+	buildFailed   bool
 	// prevLayout/prevFocus remember the layout and focused pane
 	// interrupted by the `|` PDF-only zoom so leaving the zoom restores
 	// both exactly.
@@ -253,6 +274,14 @@ type Model struct {
 	Popup    *AnnotationPopup
 	LineEdit *LineEditPopup
 	Pending  *PendingDelete
+
+	// Search is the / search state (nil = inactive); AnnList the @
+	// annotation-list overlay; ShowInfo the i scope popup. Description is
+	// the --description prose surfaced there.
+	Search      *searchState
+	AnnList     *annListState
+	ShowInfo    bool
+	Description string
 
 	EditUndo []EditSnapshot
 	EditRedo []EditSnapshot
@@ -318,6 +347,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		KittyAvailable:     opts.KittyAvailable,
 		escCache:           newPDFEscCache(opts.KittyXferDir),
 		pageLayout:         newPageLayoutCache(),
+		Description:        opts.Description,
 		SourceLineCursor:   1,
 		Layout:             LayoutNoPDF,
 		Focus:              PaneOutline,

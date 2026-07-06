@@ -45,12 +45,20 @@ func (m Model) View() string {
 		bodyHeight = 1
 	}
 
-	// Help is a full-screen overlay, not pane content: kitty images live on
-	// their own plane, so retire the painted frame while the overlay is up
-	// (the repaint on close re-transmits it).
-	if m.ShowHelp {
-		help := m.renderHelpOverlay(m.Width, bodyHeight)
-		view := lipgloss.JoinVertical(lipgloss.Left, help, clipLine(m.statusText(), m.Width))
+	// Help / info / annotation list are full-screen overlays, not pane
+	// content: kitty images live on their own plane, so retire the painted
+	// frame while an overlay is up (the repaint on close re-transmits it).
+	var overlay string
+	switch {
+	case m.ShowHelp:
+		overlay = m.renderHelpOverlay(m.Width, bodyHeight)
+	case m.ShowInfo:
+		overlay = m.renderInfoOverlay(m.Width, bodyHeight)
+	case m.AnnList != nil:
+		overlay = m.renderAnnListOverlay(m.Width, bodyHeight)
+	}
+	if overlay != "" {
+		view := lipgloss.JoinVertical(lipgloss.Left, overlay, clipLine(m.statusText(), m.Width))
 		if m.KittyAvailable {
 			return m.kittyClear() + view
 		}
@@ -242,7 +250,11 @@ func (m Model) renderPDFPane(width, height int, focusedOpt ...bool) string {
 	if innerH < 1 {
 		innerH = 1
 	}
-	content := "PDF"
+	title := "PDF"
+	if m.pdfSide == pdfSideOld {
+		title = "PDF · OLD (" + m.Review.Old.Label + ") — x flips"
+	}
+	content := title
 	if body := m.pdfPaneBody(); body != "" {
 		content += "\n" + body
 	}
@@ -623,6 +635,7 @@ func helpSections(allowModifications bool) []helpSection {
 			{"gg / G", "first / last pair"},
 			{"{ / }", "previous / next section"},
 			{"[ / ]", "previous / next source line (PDF anchor)"},
+			{"/", "search pairs — text, labels, IDs (n/N steps)"},
 			{"z", "fold/unfold outline group"},
 			{"h/l ←/→", "focus pane"},
 		}},
@@ -631,9 +644,11 @@ func helpSections(allowModifications bool) []helpSection {
 			{"a", "annotate pair"},
 			{"ctrl+a", "edit annotation"},
 			{"d", "delete annotation"},
+			{"@", "annotation list (enter jumps, d deletes)"},
 			{"y", "copy selected change (side follows focus)"},
 			{"f", "cycle filter"},
 			{"m", "semantic / coalesced diff regime"},
+			{"i", "review scope + agent description"},
 		}},
 		{editTitle, [][2]string{
 			{"e", "inline single-line edit"},
@@ -641,6 +656,7 @@ func helpSections(allowModifications bool) []helpSection {
 			{"u / ctrl+r", "undo / redo in-place edits"},
 		}},
 		{"PDF", [][2]string{
+			{"x", "blink comparator: flip old/new PDF (builds old once)"},
 			{"S", "Skim forward-search at line (never compiles)"},
 			{"P", "open new PDF in Preview"},
 			{"B", "re-diff source + rebuild/reload PDF"},

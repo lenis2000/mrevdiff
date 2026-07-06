@@ -264,15 +264,16 @@ func (c *pdfEscCache) clear() {
 	c.totalBytes = 0
 }
 
-// diffPDFRenderKey builds the cache key for one frame. The reload
-// generation invalidates everything when the PDF is rebuilt; geometry and
-// cell pixel size cover pane resizes and monitor/font changes.
-func diffPDFRenderKey(block *parser.Block, reloadGen, wCells, hCells int, cellW, cellH float64) string {
+// diffPDFRenderKey builds the cache key for one frame. The side prefix
+// separates old/new frames of the same block; the reload generation
+// invalidates everything when the PDF is rebuilt; geometry and cell pixel
+// size cover pane resizes and monitor/font changes.
+func diffPDFRenderKey(side string, block *parser.Block, reloadGen, wCells, hCells int, cellW, cellH float64) string {
 	id := ""
 	if block != nil {
 		id = block.ID
 	}
-	return fmt.Sprintf("%s|g%d|%dx%d|%.2fx%.2f", id, reloadGen, wCells, hCells, cellW, cellH)
+	return fmt.Sprintf("%s|%s|g%d|%dx%d|%.2fx%.2f", side, id, reloadGen, wCells, hCells, cellW, cellH)
 }
 
 // renderDiffPDFFrame renders (or fetches from cache) the frame for
@@ -311,6 +312,7 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		PaneWidthPx:  paneWPx,
 		PaneHeightPx: paneHPx,
 		MultiColumn:  multi,
+		MarkRegion:   true,
 	})
 	if err != nil {
 		return "", 0, "", fmt.Sprintf("pdf: %v", err)
@@ -338,7 +340,7 @@ func warmNeighborFrames(in diffPDFRenderInputs, neighbors []*parser.Block) {
 		}
 		nin := in
 		nin.Block = b
-		key := diffPDFRenderKey(b, in.ReloadGen, in.WidthCells, in.HeightCells, in.CellWidthPx, in.CellHeightPx)
+		key := diffPDFRenderKey(in.SideKey, b, in.ReloadGen, in.WidthCells, in.HeightCells, in.CellWidthPx, in.CellHeightPx)
 		if !nin.Cache.tryClaim(key) {
 			continue
 		}

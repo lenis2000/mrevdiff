@@ -38,6 +38,7 @@ type PairSummary struct {
 type Sidecar struct {
 	OldSpec      string        `json:"old_spec" yaml:"old_spec,omitempty"`
 	OldLabel     string        `json:"old_label" yaml:"old_label,omitempty"`
+	OldSHA       string        `json:"old_sha,omitempty" yaml:"old_sha,omitempty"`
 	NewSpec      string        `json:"new_spec" yaml:"new_spec,omitempty"`
 	NewPath      string        `json:"new_path" yaml:"new_path,omitempty"`
 	CursorPairID string        `json:"cursor_pair_id" yaml:"cursor_pair_id,omitempty"`
@@ -183,6 +184,7 @@ func NewSidecar(review *Review) *Sidecar {
 	return &Sidecar{
 		OldSpec:  review.Old.Spec,
 		OldLabel: review.Old.Label,
+		OldSHA:   review.Old.ResolvedSHA,
 		NewSpec:  review.New.Spec,
 		NewPath:  endpointDisplayPath(review.New),
 		Pairs:    PairSummaries(review),
@@ -556,6 +558,7 @@ func EmitJSON(w io.Writer, side *Sidecar, review *Review) error {
 	payload := struct {
 		OldSpec      string        `json:"old_spec"`
 		OldLabel     string        `json:"old_label,omitempty"`
+		OldSHA       string        `json:"old_sha,omitempty"`
 		NewSpec      string        `json:"new_spec"`
 		NewPath      string        `json:"new_path,omitempty"`
 		CursorPairID string        `json:"cursor_pair_id,omitempty"`
@@ -566,6 +569,7 @@ func EmitJSON(w io.Writer, side *Sidecar, review *Review) error {
 	}{
 		OldSpec:      side.OldSpec,
 		OldLabel:     side.OldLabel,
+		OldSHA:       side.OldSHA,
 		NewSpec:      side.NewSpec,
 		NewPath:      side.NewPath,
 		CursorPairID: side.CursorPairID,
@@ -584,6 +588,15 @@ func writeSidecarMarkdown(b *strings.Builder, side *Sidecar, review *Review, inc
 	fmt.Fprintf(b, "Old: %s", side.OldSpec)
 	if side.OldLabel != "" && side.OldLabel != side.OldSpec {
 		fmt.Fprintf(b, " (%s)", side.OldLabel)
+	}
+	if side.OldSHA != "" {
+		// Pin the symbolic rev: HEAD moves in an agent loop, so a history
+		// file saying just "HEAD" is ambiguous within the hour.
+		sha := side.OldSHA
+		if len(sha) > 12 {
+			sha = sha[:12]
+		}
+		fmt.Fprintf(b, " @ %s", sha)
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(b, "New: %s", side.NewSpec)

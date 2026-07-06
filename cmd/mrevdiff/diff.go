@@ -43,6 +43,9 @@ type diffOpts struct {
 	OpenCompare        bool `long:"open-compare" description:"open old and new sources in external compare editor after startup"`
 	AllowModifications bool `long:"allow-modifications" description:"allow e/E edits to the new endpoint when it is a real file"`
 
+	Description     string `long:"description" description:"markdown context shown in the i info popup (e.g. what an agent changed and why)"`
+	DescriptionFile string `long:"description-file" description:"file with markdown context for the i info popup"`
+
 	ExitCodeOnAnnotations bool   `long:"exit-code-on-annotations" env:"MREVDIFF_EXIT_CODE_ON_ANNOTATIONS" description:"exit 10 when the review produced annotations"`
 	HistoryDir            string `long:"history-dir" env:"MREVDIFF_HISTORY_DIR" description:"override the review history directory (default ~/.config/mrevdiff/history)"`
 	NoHistory             bool   `long:"no-history" description:"disable review history auto-save"`
@@ -102,6 +105,20 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	description := o.Description
+	if o.DescriptionFile != "" {
+		if description != "" {
+			_, _ = fmt.Fprintln(stderr, "mrevdiff: --description and --description-file are mutually exclusive")
+			return 2
+		}
+		data, readErr := os.ReadFile(o.DescriptionFile)
+		if readErr != nil {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: %v\n", readErr)
+			return 1
+		}
+		description = string(data)
+	}
+
 	cfg, cfgErr := ui.LoadConfig(o.Config, o.NoConfig)
 	if cfgErr != nil {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: %v\n", cfgErr)
@@ -116,6 +133,16 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	if resolveErr != nil {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: %v\n", resolveErr)
 		return 1
+	}
+
+	// Sweep old materialization litter from previous runs, best-effort in
+	// the background.
+	swept := map[string]bool{}
+	for _, root := range []string{oldEndpoint.RepoRoot, newEndpoint.RepoRoot} {
+		if root != "" && !swept[root] {
+			swept[root] = true
+			go diffreview.SweepStaleSessions(root, staleSessionMaxAge)
+		}
 	}
 
 	review, reviewErr := diffreview.BuildReview(oldEndpoint, newEndpoint)
@@ -214,12 +241,16 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		PDFStatus:          pdfArtifactPDFStatus(pdfArtifacts),
 		KittyAvailable:     kittyAvailable,
 		KittyXferDir:       kittyXferDir,
+		Description:        description,
 		Status:             joinStatus(initialDiffStatus(o, review), pdfArtifacts.Status),
 	})
 
 	waitRenders = model.WaitPDFRenders
 
 	final, err := runDiffTUI(model, stdout, stderr)
+	// A stale agterm flag must never outlive the review and point at a
+	// plain shell; clearing is a no-op outside agterm.
+	diffui.AgtermClearFlag()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: tui: %v\n", err)
 		return 1
@@ -234,6 +265,9 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		finalReview = fm.Review
 		finalPDF = fm.PDF
 		discarded = fm.Discarded
+		if fm.OldPDF != nil {
+			_ = fm.OldPDF.Close()
+		}
 	}
 	if discarded {
 		// Q-discard: leave the on-disk sidecar untouched and emit nothing.
@@ -369,8 +403,13 @@ func validateDiffArgs(o diffOpts, rest []string) string {
 	}
 }
 
+// staleSessionMaxAge bounds how long materialized session dirs survive.
+// A week keeps recently opened external-compare buffers valid while
+// preventing unbounded .mrevdiff litter in paper repos.
+const staleSessionMaxAge = 7 * 24 * time.Hour
+
 func resolveDiffEndpoints(ctx context.Context, o diffOpts, rest []string) (diffreview.Endpoint, diffreview.Endpoint, error) {
-	resolver := diffreview.Resolver{}
+	resolver := diffreview.Resolver{SessionID: diffreview.NewSessionID()}
 	if o.Base != "" {
 		oldEndpoint, newEndpoint, err := resolver.ResolveBase(ctx, o.Base, rest[0])
 		if err != nil {
