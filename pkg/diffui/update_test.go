@@ -147,21 +147,33 @@ func TestFoldedCursorNavigationDoesNotSkipNextVisiblePair(t *testing.T) {
 }
 
 func TestHelpIncludesDiffSpecificKeys(t *testing.T) {
-	help := RenderHelpBody(120, false)
+	// Narrow width forces the single-column path so substrings stay on
+	// one physical line (the two-column path pads between the columns).
+	help := RenderHelpBody(80, false)
 	for _, needle := range []string{
-		"e/E edit new file only when --allow-modifications is supplied",
-		"m toggle semantic/coalesced diff mode",
-		"z fold/unfold current outline group",
-		"ctrl+a edit annotation",
-		"d delete annotation",
-		"S sync/open new PDF in Skim at selected line (s also works)",
-		"C opens old+new in external compare",
-		"u undo last diff-mode edit",
-		"ctrl+r redo undone diff-mode edit",
-		"[/] select previous/next source line (PDF anchor)",
+		"inline single-line edit",
+		"$EDITOR at current line",
+		"rerun with --allow-modifications",
+		"semantic / coalesced diff regime",
+		"fold/unfold outline group",
+		"edit annotation",
+		"delete annotation",
+		"Skim forward-search at line",
+		"external compare",
+		"undo / redo in-place edits",
+		"source line (PDF anchor)",
+		"PDF-only zoom",
+		"discard annotations/marks",
 	} {
 		if !strings.Contains(help, needle) {
 			t.Fatalf("help missing %q in:\n%s", needle, help)
+		}
+	}
+	// The two-column render must include the same sections.
+	wide := RenderHelpBody(140, true)
+	for _, needle := range []string{"NAVIGATE", "REVIEW", "EDIT (new file)", "PDF", "LAYOUT", "QUIT"} {
+		if !strings.Contains(wide, needle) {
+			t.Fatalf("wide help missing section %q in:\n%s", needle, wide)
 		}
 	}
 }
@@ -372,8 +384,29 @@ func TestLayoutToggleAndPaneResize(t *testing.T) {
 	}
 
 	m = pressKey(t, m, "\\")
+	if m.Layout != LayoutSourcesPDF {
+		t.Fatalf("third \\ should drop the outline (sources + PDF), got %v", m.Layout)
+	}
+	view = m.View()
+	if strings.Contains(view, "Outline") || !strings.Contains(view, "Old source") || !strings.Contains(view, "PDF") {
+		t.Fatalf("sources+PDF view should omit the outline and keep sources + PDF:\n%s", view)
+	}
+
+	m = pressKey(t, m, "\\")
+	if m.Layout != LayoutNewPDF {
+		t.Fatalf("fourth \\ should switch to new + PDF, got %v", m.Layout)
+	}
+	if m.Focus == PaneOldSource || m.Focus == PaneOutline {
+		t.Fatalf("new+PDF layout should move focus off hidden panes, got %v", m.Focus)
+	}
+	view = m.View()
+	if strings.Contains(view, "Old source") || !strings.Contains(view, "New source") || !strings.Contains(view, "PDF") {
+		t.Fatalf("new+PDF view should show only new source and PDF:\n%s", view)
+	}
+
+	m = pressKey(t, m, "\\")
 	if m.Layout != LayoutNoPDF {
-		t.Fatalf("third \\ should hide PDF, got %v", m.Layout)
+		t.Fatalf("fifth \\ should hide PDF, got %v", m.Layout)
 	}
 	if m.Focus == PanePDF {
 		t.Fatalf("hidden PDF layout should move focus off PDF")
@@ -389,7 +422,40 @@ func TestLayoutToggleAndPaneResize(t *testing.T) {
 	}
 	m = pressKey(t, m, "\\")
 	if m.Layout != LayoutThreeCol {
-		t.Fatalf("fourth \\ should return to side-by-side layout")
+		t.Fatalf("sixth \\ should return to side-by-side layout")
+	}
+}
+
+// TestPDFOnlyZoomToggle pins the | zoom: it interrupts any layout, forces
+// PDF focus, and a second | (or \) restores the interrupted layout.
+func TestPDFOnlyZoomToggle(t *testing.T) {
+	m := New(fixtureReview(), Options{})
+	m.Width, m.Height = 120, 40
+	m.Layout = LayoutStacked
+	m.Focus = PaneOldSource
+
+	m = pressKey(t, m, "|")
+	if m.Layout != LayoutPDFOnly {
+		t.Fatalf("| should zoom to PDF only, got %v", m.Layout)
+	}
+	if m.Focus != PanePDF {
+		t.Fatalf("PDF zoom should focus the PDF pane, got %v", m.Focus)
+	}
+	view := m.View()
+	if strings.Contains(view, "Old source") || strings.Contains(view, "Outline") {
+		t.Fatalf("PDF-only view must not render other panes:\n%s", view)
+	}
+
+	m = pressKey(t, m, "|")
+	if m.Layout != LayoutStacked {
+		t.Fatalf("second | should restore the interrupted layout, got %v", m.Layout)
+	}
+
+	// \ also exits the zoom, back to the interrupted layout.
+	m = pressKey(t, m, "|")
+	m = pressKey(t, m, "\\")
+	if m.Layout != LayoutStacked {
+		t.Fatalf("\\ inside PDF zoom should restore the interrupted layout, got %v", m.Layout)
 	}
 }
 

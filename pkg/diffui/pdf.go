@@ -70,6 +70,7 @@ type diffPDFRenderInputs struct {
 	CellWidthPx  float64
 	CellHeightPx float64
 	Cache        *pdfEscCache
+	PageLayout   *pageLayoutCache
 	ReloadGen    int
 }
 
@@ -272,6 +273,7 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 	// The rebuilt document invalidates every cached frame; keep the last
 	// painted frame on screen until the fresh render replaces it.
 	m.escCache.clear()
+	m.pageLayout.Invalidate()
 	m.PDFStatus = ""
 	if msg.Status != "" {
 		m.Status = msg.Status
@@ -319,6 +321,7 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		CellWidthPx:  cellW,
 		CellHeightPx: cellH,
 		Cache:        m.escCache,
+		PageLayout:   m.pageLayout,
 		ReloadGen:    m.pdfReloadGen,
 	}
 	key := diffPDFRenderKey(pair.New, m.pdfReloadGen, w, h, cellW, cellH)
@@ -460,6 +463,13 @@ func (m Model) diffPDFPaneCells() (int, int) {
 	case LayoutStacked:
 		_, paneW = m.stackedWidths(m.Width)
 		_, paneH = m.stackedHeights(paneH)
+	case LayoutSourcesPDF:
+		paneW = m.Width
+		_, paneH = m.stackedHeights(paneH)
+	case LayoutNewPDF:
+		_, paneW = m.newPDFWidths(m.Width)
+	case LayoutPDFOnly:
+		paneW = m.Width
 	default:
 		_, _, paneW = m.paneWidths(m.Width)
 	}

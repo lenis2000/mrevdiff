@@ -166,6 +166,30 @@ func (m Model) paneAtPoint(x, y int) (Pane, bool) {
 			return PaneOldSource, true
 		}
 		return PaneNewSource, true
+	case LayoutSourcesPDF:
+		topH, _ := m.stackedHeights(bodyH)
+		if y >= topH {
+			return PanePDF, true
+		}
+		if comparisonCombined(m.Width) {
+			if x < m.Width/2 {
+				return PaneOldSource, true
+			}
+			return PaneNewSource, true
+		}
+		oldW, _ := m.sourcePaneWidths(m.Width)
+		if x < oldW {
+			return PaneOldSource, true
+		}
+		return PaneNewSource, true
+	case LayoutNewPDF:
+		sourceW, _ := m.newPDFWidths(m.Width)
+		if x < sourceW {
+			return PaneNewSource, true
+		}
+		return PanePDF, true
+	case LayoutPDFOnly:
+		return PanePDF, true
 	}
 	outlineW, sourceW, _ := m.paneWidths(m.Width)
 	if x < outlineW {

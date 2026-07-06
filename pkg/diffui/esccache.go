@@ -295,16 +295,22 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 	if file == "" && in.Doc != nil {
 		file = in.Doc.File
 	}
-	region := in.Index.RegionForLines(file, in.Block.StartLine, in.Block.EndLine)
-	if region == nil || !pdf.HasExtent(*region) {
+	region := regionForBlockLines(in.Index, file, in.Block.StartLine, in.Block.EndLine)
+	if region == nil {
 		return "", 0, "", pdf.NoRegionPlaceholder
 	}
 	epoch := in.Cache.currentEpoch()
+	// Column-aware cropping: on a two-column page a full-width crop drags
+	// in the neighboring column and its figures; slice to the region's
+	// column instead. Page-level detection avoids misfiring on narrow
+	// inline equations in single-column papers.
+	multi := in.PageLayout.IsMultiColumn(in.PDF, in.Doc, region.Page)
 	paneWPx := int(float64(in.WidthCells) * in.CellWidthPx)
 	paneHPx := int(float64(in.HeightCells) * in.CellHeightPx)
 	png, err := pdf.CropFitted(in.PDF, *region, pdf.FitOptions{
 		PaneWidthPx:  paneWPx,
 		PaneHeightPx: paneHPx,
+		MultiColumn:  multi,
 	})
 	if err != nil {
 		return "", 0, "", fmt.Sprintf("pdf: %v", err)

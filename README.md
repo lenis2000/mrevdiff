@@ -59,8 +59,9 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | `[` / `]` | select previous/next source line (PDF anchor) |
 | `h/l`, arrows | focus pane |
 | `<` / `>` | resize focused pane / source split |
-| `\` | cycle PDF layout (side / below / hidden) |
-| `?` | toggle in-app help |
+| `\` | cycle layout: full·PDF-side → full·PDF-below → sources+PDF (no outline) → new+PDF → sources-only |
+| `\|` | PDF-only zoom (toggle; remembers the interrupted layout) |
+| `?` | toggle in-app help (full-screen overlay) |
 | `q` | quit, save sidecar, emit annotations |
 | `Q Q` | discard annotations/marks and quit (in-place file edits stay) |
 
@@ -89,6 +90,12 @@ The PDF pane ports the fast-rendering work from
 - **Torn-PDF guard** — a rebuilt PDF missing its `%%EOF` trailer (latexmk
   mid-write) is never opened; the previous document stays up and the tool
   retries.
+- **Column-aware crops** — per-page column detection (median width of
+  SyncTeX-mapped blocks) slices two-column papers (PNAS etc.) to the
+  region's column instead of the full page width; single-column papers
+  are unaffected. Blocks whose lines carry no SyncTeX records (e.g.
+  boxed front-matter like `\significancestatement`) anchor to the
+  nearest mapped line instead of showing a dead placeholder.
 
 ## PDF build awareness
 

@@ -45,6 +45,18 @@ func (m Model) View() string {
 		bodyHeight = 1
 	}
 
+	// Help is a full-screen overlay, not pane content: kitty images live on
+	// their own plane, so retire the painted frame while the overlay is up
+	// (the repaint on close re-transmits it).
+	if m.ShowHelp {
+		help := m.renderHelpOverlay(m.Width, bodyHeight)
+		view := lipgloss.JoinVertical(lipgloss.Left, help, clipLine(m.statusText(), m.Width))
+		if m.KittyAvailable {
+			return m.kittyClear() + view
+		}
+		return view
+	}
+
 	var main string
 	switch m.Layout {
 	case LayoutStacked:
@@ -60,6 +72,18 @@ func (m Model) View() string {
 		outline := m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline)
 		comparison := m.renderComparisonArea(sourceW, bodyHeight)
 		main = lipgloss.JoinHorizontal(lipgloss.Top, outline, comparison)
+	case LayoutSourcesPDF:
+		topH, pdfH := m.stackedHeights(bodyHeight)
+		comparison := m.renderComparisonArea(m.Width, topH)
+		pdfPane := m.renderPDFPane(m.Width, pdfH, m.Focus == PanePDF)
+		main = lipgloss.JoinVertical(lipgloss.Left, comparison, pdfPane)
+	case LayoutNewPDF:
+		sourceW, pdfW := m.newPDFWidths(m.Width)
+		source := m.renderNewSourceArea(sourceW, bodyHeight)
+		pdfPane := m.renderPDFPane(pdfW, bodyHeight, m.Focus == PanePDF)
+		main = lipgloss.JoinHorizontal(lipgloss.Top, source, pdfPane)
+	case LayoutPDFOnly:
+		main = m.renderPDFPane(m.Width, bodyHeight, true)
 	default:
 		outlineW, sourceW, pdfW := m.paneWidths(m.Width)
 		outline := m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline)
@@ -79,9 +103,6 @@ func (m Model) View() string {
 }
 
 func (m Model) renderComparisonArea(width, height int) string {
-	if m.ShowHelp {
-		return m.renderPane("Help", RenderHelpBody(width-2, m.AllowModifications), width, height, m.Focus == PaneOldSource || m.Focus == PaneNewSource)
-	}
 	if m.LineEdit != nil {
 		return m.renderPane("Line Edit", m.renderLineEditBody(width-2, height-2), width, height, m.Focus == PaneOldSource || m.Focus == PaneNewSource)
 	}
@@ -103,6 +124,22 @@ func (m Model) renderComparisonArea(width, height int) string {
 	oldSource := m.renderPaneRaw("Old source", oldBody, oldW, height, m.Focus == PaneOldSource)
 	newSource := m.renderPaneRaw("New source", newBody, newW, height, m.Focus == PaneNewSource)
 	return lipgloss.JoinHorizontal(lipgloss.Top, oldSource, newSource)
+}
+
+// renderNewSourceArea renders just the new side of the current pair — the
+// LayoutNewPDF reading/edit mode. Shares the overlay behavior (help, line
+// edit, annotation popup) with renderComparisonArea.
+func (m Model) renderNewSourceArea(width, height int) string {
+	if m.LineEdit != nil {
+		return m.renderPane("Line Edit", m.renderLineEditBody(width-2, height-2), width, height, m.Focus == PaneOldSource || m.Focus == PaneNewSource)
+	}
+	if m.Popup != nil {
+		return m.renderPane("Annotation", m.Popup.TA.View(), width, height, m.Focus == PaneOldSource || m.Focus == PaneNewSource)
+	}
+	_, newAnchor := m.sourceAnchorLines()
+	pair := m.CurrentDisplayPair()
+	body := RenderPairSourceSideHighlighted(pair, false, width-2, height-2, 0, newAnchor)
+	return m.renderPaneRaw("New source", body, width, height, m.Focus == PaneNewSource)
 }
 
 func (m Model) renderLineEditBody(innerW, innerH int) string {
@@ -268,6 +305,27 @@ func (m Model) noPDFWidths(width int) (outline, source int) {
 	return m.stackedWidths(width)
 }
 
+// newPDFWidths splits the terminal between the new-source pane and the PDF
+// pane for LayoutNewPDF. Derived from PDFFrac (so </> resizing carries
+// over) but re-centered: with only two panes the PDF deserves roughly half
+// the width, not the sliver it gets as a fourth column.
+func (m Model) newPDFWidths(width int) (source, pdf int) {
+	if width < 2 {
+		return 1, 1
+	}
+	_, pdfFrac, _, _ := m.layoutValues()
+	frac := clampFloat(pdfFrac*2, 0.30, 0.70)
+	pdf = int(float64(width) * frac)
+	if pdf < 1 {
+		pdf = 1
+	}
+	source = width - pdf
+	if source < 1 {
+		source = 1
+	}
+	return source, pdf
+}
+
 func (m Model) stackedHeights(height int) (top, bottom int) {
 	if height < 2 {
 		return 1, 1
@@ -364,26 +422,86 @@ func (m *Model) ensureLayoutDefaults() {
 	m.OutlineFrac, m.PDFFrac, m.StackedTopFrac, m.SourceSplitFrac = m.layoutValues()
 }
 
+// layoutName is the status-line label for each layout.
+func layoutName(l LayoutMode) string {
+	switch l {
+	case LayoutThreeCol:
+		return "full — PDF side"
+	case LayoutStacked:
+		return "full — PDF below"
+	case LayoutSourcesPDF:
+		return "sources + PDF (outline hidden)"
+	case LayoutNewPDF:
+		return "new + PDF"
+	case LayoutNoPDF:
+		return "sources only (PDF hidden)"
+	case LayoutPDFOnly:
+		return "PDF only"
+	}
+	return "?"
+}
+
+// cycleLayout steps through the five working layouts:
+//
+//	full/PDF-side → full/PDF-below → sources+PDF → new+PDF → sources-only →
+//
+// The `|` PDF-only zoom sits outside the cycle; pressing `\` inside it
+// drops back to the interrupted layout.
 func (m *Model) cycleLayout() {
 	switch m.Layout {
 	case LayoutThreeCol:
 		m.Layout = LayoutStacked
-		m.Status = "layout: PDF below source"
 	case LayoutStacked:
+		m.Layout = LayoutSourcesPDF
+	case LayoutSourcesPDF:
+		m.Layout = LayoutNewPDF
+	case LayoutNewPDF:
 		m.Layout = LayoutNoPDF
-		if m.Focus == PanePDF {
-			m.Focus = PaneNewSource
-		}
-		m.Status = "layout: PDF hidden"
-	default:
+	case LayoutPDFOnly:
+		m.Layout = m.prevLayout
+	default: // LayoutNoPDF
 		m.Layout = LayoutThreeCol
-		m.Status = "layout: side-by-side"
 	}
+	m.snapFocusToLayout()
+	m.Status = "layout: " + layoutName(m.Layout)
+}
+
+// togglePDFOnly zooms the PDF pane to the whole terminal and back,
+// remembering the layout it interrupted.
+func (m *Model) togglePDFOnly() {
+	if m.Layout == LayoutPDFOnly {
+		m.Layout = m.prevLayout
+		m.snapFocusToLayout()
+		m.Status = "layout: " + layoutName(m.Layout)
+		return
+	}
+	m.prevLayout = m.Layout
+	m.Layout = LayoutPDFOnly
+	m.Focus = PanePDF
+	m.Status = "layout: PDF only (| or \\ to restore)"
+}
+
+// snapFocusToLayout moves focus to the new-source pane when the current
+// layout no longer shows the focused pane.
+func (m *Model) snapFocusToLayout() {
+	for _, p := range m.focusOrder() {
+		if p == m.Focus {
+			return
+		}
+	}
+	m.Focus = PaneNewSource
 }
 
 func (m Model) focusOrder() []Pane {
-	if m.Layout == LayoutNoPDF {
+	switch m.Layout {
+	case LayoutNoPDF:
 		return []Pane{PaneOutline, PaneOldSource, PaneNewSource}
+	case LayoutSourcesPDF:
+		return []Pane{PaneOldSource, PaneNewSource, PanePDF}
+	case LayoutNewPDF:
+		return []Pane{PaneNewSource, PanePDF}
+	case LayoutPDFOnly:
+		return []Pane{PanePDF}
 	}
 	return []Pane{PaneOutline, PaneOldSource, PaneNewSource, PanePDF}
 }
@@ -419,19 +537,24 @@ func (m *Model) resizeFocusedPane(delta int) bool {
 	case PaneOutline:
 		m.OutlineFrac += step
 	case PanePDF:
-		if m.Layout == LayoutNoPDF {
+		switch m.Layout {
+		case LayoutNoPDF, LayoutPDFOnly:
 			return false
-		}
-		if m.Layout == LayoutStacked {
+		case LayoutStacked, LayoutSourcesPDF:
 			// Top share shrinks when the focused bottom PDF grows.
 			m.StackedTopFrac -= step
-		} else {
+		default:
 			m.PDFFrac += step
 		}
 	case PaneOldSource:
 		m.SourceSplitFrac += step
 	case PaneNewSource:
-		m.SourceSplitFrac -= step
+		if m.Layout == LayoutNewPDF {
+			// Only two panes: growing the source shrinks the PDF share.
+			m.PDFFrac -= step
+		} else {
+			m.SourceSplitFrac -= step
+		}
 	}
 	m.OutlineFrac, m.PDFFrac, m.StackedTopFrac, m.SourceSplitFrac = clampLayoutValues(
 		m.OutlineFrac,
@@ -471,43 +594,123 @@ func clampFloat(v, lo, hi float64) float64 {
 	return v
 }
 
-// RenderHelpBody returns the diff-specific help text.
-func RenderHelpBody(width int, allowModifications bool) string {
-	lines := []string{
-		"j/k, ↑/↓ move by change pair; source panes scroll; counts work (10j/5k)",
-		"J/K jump 10 down / 5 up pairs",
-		"gg/G first/last pair",
-		"{/} previous/next section",
-		"f cycle filter",
-		"m toggle semantic/coalesced diff mode",
-		"z fold/unfold current outline group",
-		"space mark reviewed",
-		"a annotate pair",
-		"ctrl+a edit annotation",
-		"d delete annotation",
-		"y copy selected change (old/new side follows focus)",
-		"e/E edit new file only when --allow-modifications is supplied",
-		"[/] select previous/next source line (PDF anchor)",
-		"h/l or ←/→ focus pane",
-		"< / > resize focused pane or source split",
-		"\\ cycle PDF layout: side pane / below / hidden",
-		"u undo last diff-mode edit",
-		"ctrl+r redo undone diff-mode edit",
-		"B reload source diff and rebuild/reload new PDF after edits",
-		"S sync/open new PDF in Skim at selected line (s also works)",
-		"P open new PDF in Preview",
-		"C opens old+new in external compare",
-		"? close help",
-		"q quit (save sidecar + emit annotations)",
-		"Q Q discard annotations/marks and quit (no save, no emit; file edits stay)",
-	}
+// helpSection groups related bindings under a heading for the overlay.
+type helpSection struct {
+	title string
+	rows  [][2]string
+}
+
+func helpSections(allowModifications bool) []helpSection {
+	editTitle := "EDIT (new file)"
 	if !allowModifications {
-		lines = append(lines, "editing is currently disabled")
+		editTitle = "EDIT (disabled — rerun with --allow-modifications)"
 	}
-	for i, line := range lines {
-		lines[i] = clipLine(line, width)
+	return []helpSection{
+		{"NAVIGATE", [][2]string{
+			{"j/k ↑/↓", "move by change pair (counts: 10j)"},
+			{"J/K", "jump 10 down / 5 up pairs"},
+			{"gg / G", "first / last pair"},
+			{"{ / }", "previous / next section"},
+			{"[ / ]", "previous / next source line (PDF anchor)"},
+			{"z", "fold/unfold outline group"},
+			{"h/l ←/→", "focus pane"},
+		}},
+		{"REVIEW", [][2]string{
+			{"space", "mark reviewed"},
+			{"a", "annotate pair"},
+			{"ctrl+a", "edit annotation"},
+			{"d", "delete annotation"},
+			{"y", "copy selected change (side follows focus)"},
+			{"f", "cycle filter"},
+			{"m", "semantic / coalesced diff regime"},
+		}},
+		{editTitle, [][2]string{
+			{"e", "inline single-line edit"},
+			{"E", "$EDITOR at current line"},
+			{"u / ctrl+r", "undo / redo in-place edits"},
+		}},
+		{"PDF", [][2]string{
+			{"S", "Skim forward-search at line (never compiles)"},
+			{"P", "open new PDF in Preview"},
+			{"B", "re-diff source + rebuild/reload PDF"},
+			{"C", "old vs new in external compare"},
+		}},
+		{"LAYOUT", [][2]string{
+			{"\\", "cycle: full·side → full·below → sources+PDF → new+PDF → no PDF"},
+			{"|", "PDF-only zoom (toggle)"},
+			{"< / >", "resize focused pane / source split"},
+		}},
+		{"QUIT", [][2]string{
+			{"q", "quit — save sidecar, emit annotations"},
+			{"Q Q", "discard annotations/marks (file edits stay)"},
+			{"?", "close help"},
+		}},
+	}
+}
+
+// renderHelpSection formats one section with an aligned key column.
+func renderHelpSection(s helpSection, width int) string {
+	keyW := 0
+	for _, r := range s.rows {
+		if w := lipgloss.Width(r[0]); w > keyW {
+			keyW = w
+		}
+	}
+	lines := []string{clipLine(s.title, width)}
+	for _, r := range s.rows {
+		key := r[0] + strings.Repeat(" ", keyW-lipgloss.Width(r[0]))
+		lines = append(lines, clipLine("  "+key+"  "+r[1], width))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// RenderHelpBody returns the sectioned help text: two balanced columns
+// when the width allows, a single column otherwise.
+func RenderHelpBody(width int, allowModifications bool) string {
+	sections := helpSections(allowModifications)
+	if width < 100 {
+		parts := make([]string, 0, len(sections))
+		for _, s := range sections {
+			parts = append(parts, renderHelpSection(s, width))
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	gap := 4
+	colW := (width - gap) / 2
+	half := (len(sections) + 1) / 2
+	renderCol := func(ss []helpSection) string {
+		parts := make([]string, 0, len(ss))
+		for _, s := range ss {
+			parts = append(parts, renderHelpSection(s, colW))
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	left := renderCol(sections[:half])
+	right := renderCol(sections[half:])
+	// Pad the left column to a fixed width so the right column aligns.
+	leftLines := strings.Split(left, "\n")
+	for i := range leftLines {
+		leftLines[i] = padANSIToWidth(leftLines[i], colW)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		strings.Join(leftLines, "\n"),
+		strings.Repeat(" ", gap)+"",
+		right)
+}
+
+// renderHelpOverlay renders the full-screen help: a centered bordered box
+// over a blank body, replacing the entire pane layout while open.
+func (m Model) renderHelpOverlay(width, bodyHeight int) string {
+	inner := width - 8
+	if inner < 20 {
+		inner = 20
+	}
+	body := "mrevdiff — keys\n\n" + RenderHelpBody(inner, m.AllowModifications)
+	box := m.Styles.PaneFocused.
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 3).
+		Render(body)
+	return lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, box)
 }
 
 func fitLines(text string, width, height int) string {

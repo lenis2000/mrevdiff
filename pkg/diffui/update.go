@@ -153,6 +153,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cycleLayout()
 		m.PDFImage = ""
 		return m.withPDFRender()
+	case "|":
+		m.togglePDFOnly()
+		m.PDFImage = ""
+		return m.withPDFRender()
 	case "h", "left":
 		m.moveFocus(-1)
 		return m, nil

@@ -124,6 +124,17 @@ const (
 	// LayoutNoPDF renders outline | old | new, while keeping build/reload behavior
 	// unchanged; only the PDF pane is hidden.
 	LayoutNoPDF
+	// LayoutSourcesPDF drops the outline: old | new full-width on top, PDF
+	// below. Maximum horizontal room for the diff itself.
+	LayoutSourcesPDF
+	// LayoutNewPDF drops the outline AND the old side: new source | PDF.
+	// The reading/edit-in-place mode — current text next to its rendered
+	// result.
+	LayoutNewPDF
+	// LayoutPDFOnly zooms the PDF pane to the whole terminal. Not part of
+	// the `\` cycle — toggled directly with `|` and remembers the layout
+	// it interrupted.
+	LayoutPDFOnly
 )
 
 // Options configures a new diff TUI model.
@@ -211,6 +222,11 @@ type Model struct {
 	lastKittyID uint32
 	// escCache memoises rendered frames (and owns their t=f files).
 	escCache *pdfEscCache
+	// pageLayout memoises per-page column detection for column-aware crops.
+	pageLayout *pageLayoutCache
+	// prevLayout remembers the layout interrupted by the `|` PDF-only
+	// zoom so the second `|` restores it.
+	prevLayout LayoutMode
 
 	ShowHelp bool
 	// CountBuf accumulates digit prefixes for Vim-style diff motions (e.g. "10j").
@@ -299,6 +315,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		PDFStatus:          opts.PDFStatus,
 		KittyAvailable:     opts.KittyAvailable,
 		escCache:           newPDFEscCache(opts.KittyXferDir),
+		pageLayout:         newPageLayoutCache(),
 		SourceLineCursor:   1,
 		Layout:             LayoutNoPDF,
 		Focus:              PaneOutline,
