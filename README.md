@@ -43,19 +43,26 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | Key | Action |
 |---|---|
 | `j/k`, counts, `gg/G`, `{`/`}` | navigate pairs / sections |
+| `J/K`, `pgdown/pgup` | jump 10 down / 5 up pairs |
 | `f` | cycle filter (all / unreviewed / changed / …) |
 | `m` | toggle semantic / coalesced diff regime |
+| `z` | fold/unfold current outline group |
 | `space` | mark pair reviewed |
 | `a`, `ctrl+a`, `d` | annotate / edit / delete annotation |
+| `y` | copy selected change (old/new side follows focus) |
 | `e` / `E` | inline / external `$EDITOR` edit of the **new** file (needs `--allow-modifications`) |
 | `u` / `ctrl+r` | undo / redo in-place edits |
 | `B` | re-diff source + rebuild/reload PDF |
 | `S` | Skim forward-search at current line (never compiles) |
 | `P` | open new PDF in Preview |
 | `C` | open old+new in external compare editor |
+| `[` / `]` | select previous/next source line (PDF anchor) |
+| `h/l`, arrows | focus pane |
+| `<` / `>` | resize focused pane / source split |
 | `\` | cycle PDF layout (side / below / hidden) |
+| `?` | toggle in-app help |
 | `q` | quit, save sidecar, emit annotations |
-| `Q Q` | discard session changes and quit |
+| `Q Q` | discard annotations/marks and quit (in-place file edits stay) |
 
 ## PDF pane performance
 
@@ -101,8 +108,10 @@ nearest `.mrevdiff.toml` up to the git root. Keys: `build_cmd`, `theme`
 Environment: `MREVDIFF_THEME`, `MREVDIFF_FORCE_KITTY`,
 `MREVDIFF_COMPARE_EDITOR` (for `C`; falls back to `opendiff`, `zed`),
 `$EDITOR` (for `E`), `MREVDIFF_EXIT_CODE_ON_ANNOTATIONS`,
-`MREVDIFF_HISTORY_DIR`. The `MREVIEW_*` spellings are honoured as
-fallbacks so an existing mreview setup keeps working.
+`MREVDIFF_HISTORY_DIR`. For `MREVDIFF_THEME`, `MREVDIFF_FORCE_KITTY`, and
+`MREVDIFF_COMPARE_EDITOR` the `MREVIEW_*` spellings are honoured as
+fallbacks so an existing mreview setup keeps working; the exit-code and
+history vars are new to mrevdiff and have no `MREVIEW_*` equivalent.
 
 ## Requirements
 

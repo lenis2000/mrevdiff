@@ -25,6 +25,12 @@ import (
 // single-paper document where only a handful of pages are in play.
 const DefaultPageCacheSize = 16
 
+// DefaultPageCacheBytes bounds the LRU by cumulative pixmap size. With
+// 2× supersampling a letter page can reach ~75 MB RGBA (450 DPI), so a
+// pure count bound of 16 would allow >1 GB of retained pixmaps; the byte
+// budget evicts early instead while leaving small-DPI behavior unchanged.
+const DefaultPageCacheBytes = 256 << 20
+
 // Doc wraps an opened PDF with a bounded pixmap LRU and a Close guard.
 type Doc struct {
 	path   string
@@ -138,11 +144,15 @@ type pageKey struct {
 	dpi  float64
 }
 
-// lruPages is a bounded LRU over rendered page pixmaps.
+// lruPages is a bounded LRU over rendered page pixmaps: at most max
+// entries AND at most maxBytes of cumulative pixel data (always keeping
+// at least one entry so the current page stays cached).
 type lruPages struct {
-	max   int
-	ll    *list.List
-	index map[pageKey]*list.Element
+	max      int
+	maxBytes int
+	bytes    int
+	ll       *list.List
+	index    map[pageKey]*list.Element
 }
 
 type lruEntry struct {
@@ -154,7 +164,14 @@ func newLRU(max int) *lruPages {
 	if max < 1 {
 		max = 1
 	}
-	return &lruPages{max: max, ll: list.New(), index: map[pageKey]*list.Element{}}
+	return &lruPages{max: max, maxBytes: DefaultPageCacheBytes, ll: list.New(), index: map[pageKey]*list.Element{}}
+}
+
+func pixmapBytes(img *image.RGBA) int {
+	if img == nil {
+		return 0
+	}
+	return len(img.Pix)
 }
 
 func (l *lruPages) get(k pageKey) (*image.RGBA, bool) {
@@ -167,18 +184,28 @@ func (l *lruPages) get(k pageKey) (*image.RGBA, bool) {
 
 func (l *lruPages) put(k pageKey, img *image.RGBA) {
 	if e, ok := l.index[k]; ok {
+		l.bytes -= pixmapBytes(e.Value.(lruEntry).img)
+		l.bytes += pixmapBytes(img)
 		e.Value = lruEntry{key: k, img: img}
 		l.ll.MoveToFront(e)
+		l.evict()
 		return
 	}
 	e := l.ll.PushFront(lruEntry{key: k, img: img})
 	l.index[k] = e
-	for l.ll.Len() > l.max {
+	l.bytes += pixmapBytes(img)
+	l.evict()
+}
+
+func (l *lruPages) evict() {
+	for l.ll.Len() > l.max || (l.bytes > l.maxBytes && l.ll.Len() > 1) {
 		tail := l.ll.Back()
 		if tail == nil {
 			break
 		}
+		entry := tail.Value.(lruEntry)
 		l.ll.Remove(tail)
-		delete(l.index, tail.Value.(lruEntry).key)
+		delete(l.index, entry.key)
+		l.bytes -= pixmapBytes(entry.img)
 	}
 }

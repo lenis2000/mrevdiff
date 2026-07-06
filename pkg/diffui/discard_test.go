@@ -41,6 +41,26 @@ func TestQDiscardRequiresTwoPresses(t *testing.T) {
 	}
 }
 
+// TestMouseDisarmsPendingDiscard pins the fix for the stale-armed-Q bug:
+// mouse activity between the two Q presses must disarm the discard, or an
+// accidental Q followed by minutes of wheel navigation would let a later
+// Q discard the session with no visible warning.
+func TestMouseDisarmsPendingDiscard(t *testing.T) {
+	m := New(fixtureReview(), Options{})
+	m = pressKey(t, m, "Q")
+
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	nm, ok := next.(Model)
+	if !ok {
+		t.Fatalf("unexpected model type %T", next)
+	}
+
+	nm = pressKey(t, nm, "Q")
+	if nm.Discarded {
+		t.Fatalf("Q after mouse activity must be a fresh first press, not a discard")
+	}
+}
+
 // TestPlainQuitDoesNotDiscard guards against q ever picking up the
 // discard flag: q is the keep-and-emit path.
 func TestPlainQuitDoesNotDiscard(t *testing.T) {

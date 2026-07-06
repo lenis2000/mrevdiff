@@ -45,6 +45,7 @@ type diffPDFRenderMsg struct {
 	Generation int
 	Image      string
 	ImageID    uint32
+	XferPath   string
 	Status     string
 }
 
@@ -322,13 +323,25 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 	}
 	key := diffPDFRenderKey(pair.New, m.pdfReloadGen, w, h, cellW, cellH)
 	neighbors := m.neighborNewBlocks(pair.ID)
+	// Register the in-flight render synchronously (Update goroutine) so a
+	// quit that races the tick still waits for it in WaitPDFRenders.
+	m.escCache.renderStarted()
 	return tea.Tick(diffPDFRenderDebounce, func(time.Time) tea.Msg {
-		image, imageID, status := renderDiffPDFFrame(inputs, key)
+		defer inputs.Cache.renderDone()
+		image, imageID, xferPath, status := renderDiffPDFFrame(inputs, key)
 		if len(neighbors) > 0 {
+			inputs.Cache.renderStarted()
 			go warmNeighborFrames(inputs, neighbors)
 		}
-		return diffPDFRenderMsg{Generation: gen, Image: image, ImageID: imageID, Status: status}
+		return diffPDFRenderMsg{Generation: gen, Image: image, ImageID: imageID, XferPath: xferPath, Status: status}
 	})
+}
+
+// WaitPDFRenders blocks until in-flight PDF render/prefetch goroutines
+// finish (or the timeout elapses). The cmd layer calls this before
+// removing the t=f transfer directory those goroutines write into.
+func (m Model) WaitPDFRenders(timeout time.Duration) bool {
+	return m.escCache.drainRenders(timeout)
 }
 
 // neighborNewBlocks returns the new-side blocks of up to two pairs on each
@@ -376,6 +389,12 @@ func (m Model) applyPDFRender(msg diffPDFRenderMsg) (Model, tea.Cmd) {
 	}
 	if msg.ImageID != 0 {
 		m.lastKittyID = msg.ImageID
+	}
+	if image != "" {
+		// Pin the transfer file behind the frame we are about to paint:
+		// the terminal re-reads that path on every repaint, so the cache
+		// must never unlink it while PDFImage references it.
+		m.escCache.pin(msg.XferPath)
 	}
 	m.PDFImage = image
 	m.PDFStatus = msg.Status

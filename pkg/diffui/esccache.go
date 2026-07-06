@@ -6,16 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"mrevdiff/pkg/parser"
 	"mrevdiff/pkg/pdf"
 )
 
-// pdfEscCacheMax bounds the rendered-frame cache. Each entry is either a
-// full base64 escape (inline mode, up to a few MB) or a ~200-byte t=f
-// escape plus a PNG on disk; 48 covers a long review's worth of block
-// revisits without unbounded growth.
-const pdfEscCacheMax = 48
+// pdfEscCacheMax bounds the rendered-frame cache by entry count, and
+// pdfEscCacheMaxBytes by cumulative escape size. In t=f mode entries are
+// ~200-byte path escapes and only the count bound matters; in inline mode
+// a supersampled crop's base64 escape can reach a few hundred KB to ~1 MB,
+// so the byte budget caps worst-case retention at ~32 MB.
+const (
+	pdfEscCacheMax      = 48
+	pdfEscCacheMaxBytes = 32 << 20
+)
 
 // pdfEscEntry is one cached PDF-pane frame: the ready-to-paint kitty
 // escape and the image id it transmits under.
@@ -26,16 +31,34 @@ type pdfEscEntry struct {
 
 // pdfEscCache memoises rendered PDF-pane frames keyed by block + geometry +
 // reload generation, so revisiting a block (or arriving via prefetch) skips
-// the crop + PNG encode + escape build entirely. Shared by the render tick
-// goroutine and the neighbor-prefetch goroutines, hence the mutex. It also
-// owns the t=f transfer files: a frame's PNG lives exactly as long as its
-// cache entry.
+// the crop + PNG encode + escape build entirely. Recency is LRU: get moves
+// a hit to the back of the eviction order, so the frame being displayed is
+// never the eviction victim. Shared by the render tick goroutine and the
+// neighbor-prefetch goroutines, hence the mutex.
+//
+// The cache also owns the t=f transfer files, with one crucial exception:
+// the file backing the currently *painted* frame (the escape held in
+// Model.PDFImage) is pinned via pin() and never unlinked by clear() or
+// eviction — the terminal re-reads that path on every repaint of the pane,
+// so unlinking it would blank the pane until the next successful render.
 type pdfEscCache struct {
 	mu       sync.Mutex
 	entries  map[string]pdfEscEntry
-	order    []string // FIFO eviction order
+	order    []string // LRU order, oldest first
 	inflight map[string]bool
 	xferDir  string // non-empty → t=f file transmission
+	// pinned is the transfer file backing the currently displayed frame.
+	pinned string
+	// epoch increments on clear(); renders snapshot it before their work
+	// so a slow render straddling a PDF reload cannot re-insert a frame
+	// of the pre-reload document.
+	epoch int
+	// totalBytes tracks cumulative escape sizes for the byte budget.
+	totalBytes int
+	// wg counts in-flight render/prefetch work so the process can drain
+	// it before removing xferDir (Bubble Tea abandons Cmd goroutines on
+	// quit). WaitGroup carries its own synchronisation — not under mu.
+	wg sync.WaitGroup
 }
 
 func newPDFEscCache(xferDir string) *pdfEscCache {
@@ -46,6 +69,7 @@ func newPDFEscCache(xferDir string) *pdfEscCache {
 	}
 }
 
+// get returns the cached frame for key and refreshes its LRU recency.
 func (c *pdfEscCache) get(key string) (pdfEscEntry, bool) {
 	if c == nil {
 		return pdfEscEntry{}, false
@@ -53,27 +77,97 @@ func (c *pdfEscCache) get(key string) (pdfEscEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
+	if ok {
+		c.touchLocked(key)
+	}
 	return e, ok
 }
 
-func (c *pdfEscCache) put(key string, e pdfEscEntry) {
+// touchLocked moves key to the back of the eviction order. Caller holds mu.
+func (c *pdfEscCache) touchLocked(key string) {
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			c.order = append(c.order, key)
+			return
+		}
+	}
+}
+
+// put inserts a frame rendered under the given epoch. A stale epoch means
+// clear() ran (PDF reload) while this render was in flight: the frame
+// depicts the pre-reload document, so it is dropped and its transfer file
+// removed instead of poisoning a cache slot with an unreachable key.
+func (c *pdfEscCache) put(key string, e pdfEscEntry, epoch int) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, exists := c.entries[key]; !exists {
+	if epoch != c.epoch {
+		c.removeFileLocked(key)
+		return
+	}
+	if old, exists := c.entries[key]; exists {
+		c.totalBytes -= len(old.image)
+		c.touchLocked(key)
+	} else {
 		c.order = append(c.order, key)
 	}
 	c.entries[key] = e
-	for len(c.order) > pdfEscCacheMax {
+	c.totalBytes += len(e.image)
+	for len(c.order) > pdfEscCacheMax || (c.totalBytes > pdfEscCacheMaxBytes && len(c.order) > 1) {
 		oldest := c.order[0]
 		c.order = c.order[1:]
+		c.totalBytes -= len(c.entries[oldest].image)
 		delete(c.entries, oldest)
-		if c.xferDir != "" {
-			_ = os.Remove(c.framePath(oldest))
+		c.removeFileLocked(oldest)
+	}
+}
+
+// removeFileLocked unlinks key's transfer file unless it is the pinned
+// (currently displayed) frame. Caller holds mu.
+func (c *pdfEscCache) removeFileLocked(key string) {
+	if c.xferDir == "" {
+		return
+	}
+	path := c.framePath(key)
+	if path == c.pinned {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// pin marks path as the transfer file behind the currently painted frame.
+// The previously pinned file is unlinked if no live cache entry owns it
+// (its entry may have been evicted or cleared while it was pinned).
+func (c *pdfEscCache) pin(path string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev := c.pinned
+	c.pinned = path
+	if prev == "" || prev == path || c.xferDir == "" {
+		return
+	}
+	for key := range c.entries {
+		if c.framePath(key) == prev {
+			return // still cached; eviction will handle it later
 		}
 	}
+	_ = os.Remove(prev)
+}
+
+// currentEpoch snapshots the cache epoch before a render starts.
+func (c *pdfEscCache) currentEpoch() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.epoch
 }
 
 // tryClaim marks key as being rendered; returns false when another
@@ -103,6 +197,40 @@ func (c *pdfEscCache) release(key string) {
 	delete(c.inflight, key)
 }
 
+// renderStarted/renderDone bracket in-flight render work for drainRenders.
+func (c *pdfEscCache) renderStarted() {
+	if c == nil {
+		return
+	}
+	c.wg.Add(1)
+}
+
+func (c *pdfEscCache) renderDone() {
+	if c == nil {
+		return
+	}
+	c.wg.Done()
+}
+
+// drainRenders waits until all in-flight render/prefetch work finished or
+// the timeout elapsed. Returns true when fully drained.
+func (c *pdfEscCache) drainRenders(timeout time.Duration) bool {
+	if c == nil {
+		return true
+	}
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // framePath names the t=f PNG for a cache key. Content-addressed by the
 // key hash so distinct frames never overwrite each other while cached.
 func (c *pdfEscCache) framePath(key string) string {
@@ -111,21 +239,29 @@ func (c *pdfEscCache) framePath(key string) string {
 	return filepath.Join(c.xferDir, fmt.Sprintf("crop-%016x.png", h.Sum64()))
 }
 
-// clear drops every entry and removes their transfer files. Called on PDF
-// reload: the new document invalidates every cached frame wholesale.
+// clear drops every entry and removes their transfer files — except the
+// pinned file backing the frame still painted on screen (Model.PDFImage
+// deliberately outlives the reload so the pane never blanks; the terminal
+// re-reads that path on repaints). Called on PDF reload; bumps the epoch
+// so in-flight renders of the old document discard themselves.
 func (c *pdfEscCache) clear() {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.epoch++
 	if c.xferDir != "" {
 		for key := range c.entries {
-			_ = os.Remove(c.framePath(key))
+			path := c.framePath(key)
+			if path != c.pinned {
+				_ = os.Remove(path)
+			}
 		}
 	}
 	c.entries = make(map[string]pdfEscEntry)
 	c.order = nil
+	c.totalBytes = 0
 }
 
 // diffPDFRenderKey builds the cache key for one frame. The reload
@@ -140,15 +276,20 @@ func diffPDFRenderKey(block *parser.Block, reloadGen, wCells, hCells int, cellW,
 }
 
 // renderDiffPDFFrame renders (or fetches from cache) the frame for
-// in.Block and returns the escape plus its image id. Safe for concurrent
-// use — this is the shared path for the on-demand render tick and the
+// in.Block and returns the escape, its image id, and — in t=f mode — the
+// transfer file the escape references (for pinning). Safe for concurrent
+// use: this is the shared path for the on-demand render tick and the
 // neighbor prefetch goroutines.
-func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, string) {
+func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, string, string) {
+	transferPath := ""
+	if in.Cache != nil && in.Cache.xferDir != "" {
+		transferPath = in.Cache.framePath(key)
+	}
 	if e, ok := in.Cache.get(key); ok {
-		return e.image, e.id, ""
+		return e.image, e.id, transferPath, ""
 	}
 	if in.Block == nil || in.Block.StartLine < 1 {
-		return "", 0, pdf.NoRegionPlaceholder
+		return "", 0, "", pdf.NoRegionPlaceholder
 	}
 	file := in.Block.File
 	if file == "" && in.Doc != nil {
@@ -156,8 +297,9 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 	}
 	region := in.Index.RegionForLines(file, in.Block.StartLine, in.Block.EndLine)
 	if region == nil || !pdf.HasExtent(*region) {
-		return "", 0, pdf.NoRegionPlaceholder
+		return "", 0, "", pdf.NoRegionPlaceholder
 	}
+	epoch := in.Cache.currentEpoch()
 	paneWPx := int(float64(in.WidthCells) * in.CellWidthPx)
 	paneHPx := int(float64(in.HeightCells) * in.CellHeightPx)
 	png, err := pdf.CropFitted(in.PDF, *region, pdf.FitOptions{
@@ -165,19 +307,15 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		PaneHeightPx: paneHPx,
 	})
 	if err != nil {
-		return "", 0, fmt.Sprintf("pdf: %v", err)
+		return "", 0, "", fmt.Sprintf("pdf: %v", err)
 	}
 	id := pdf.NextKittyImageID()
-	transferPath := ""
-	if in.Cache != nil && in.Cache.xferDir != "" {
-		transferPath = in.Cache.framePath(key)
-	}
 	esc, err := pdf.RenderKittyFrame(png, in.WidthCells, in.HeightCells, id, transferPath)
 	if err != nil {
-		return "", 0, fmt.Sprintf("pdf: %v", err)
+		return "", 0, "", fmt.Sprintf("pdf: %v", err)
 	}
-	in.Cache.put(key, pdfEscEntry{image: esc, id: id})
-	return esc, id, ""
+	in.Cache.put(key, pdfEscEntry{image: esc, id: id}, epoch)
+	return esc, id, transferPath, ""
 }
 
 // warmNeighborFrames pre-renders the frames for the blocks adjacent to the
@@ -186,6 +324,7 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 // internally, so concurrent warms are safe (merely queued). A panic in a
 // warm (e.g. a document closed mid-reload) must never take the TUI down.
 func warmNeighborFrames(in diffPDFRenderInputs, neighbors []*parser.Block) {
+	defer in.Cache.renderDone()
 	defer func() { _ = recover() }()
 	for _, b := range neighbors {
 		if b == nil {

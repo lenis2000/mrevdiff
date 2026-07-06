@@ -39,6 +39,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffSkimOpenFinishedMsg:
 		return m.applySkimOpenFinished(msg)
 	case tea.MouseMsg:
+		// Mouse activity disarms a pending Q-discard just like any key:
+		// mouse handlers overwrite the status line, so leaving the flag
+		// armed would let a much-later Q discard without a visible warning.
+		m.discardArmed = false
 		if m.LineEdit != nil || m.Popup != nil {
 			return m, nil
 		}
@@ -80,7 +84,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.discardArmed = true
-		m.Status = "press Q again to quit discarding this session's changes (q keeps them)"
+		m.Status = "press Q again to quit discarding annotations/marks — in-place file edits stay (q keeps everything)"
 		return m, nil
 	}
 	m.discardArmed = false

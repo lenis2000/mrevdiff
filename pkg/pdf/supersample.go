@@ -9,8 +9,10 @@ import (
 // fitMaxDPISupersampled bounds the DPI after the supersample multiplier.
 // CropFitted renders the *whole page* pixmap at the chosen DPI before
 // cropping, so an unbounded 2× on the normal 300 cap would allow ~134 MB
-// RGBA pages into the LRU. 450 keeps the worst case near 75 MB while still
-// doubling the typical (100-200 DPI) render.
+// RGBA pages. 450 keeps a single letter page near 75 MB while still
+// doubling the typical (100-200 DPI) render; the aggregate across the
+// page LRU is separately capped by DefaultPageCacheBytes, since a
+// 16-entry count bound alone would retain over 1 GB at this ceiling.
 const fitMaxDPISupersampled = 450.0
 
 var superSampleOnce sync.Once

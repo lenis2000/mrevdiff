@@ -220,9 +220,11 @@ type Model struct {
 
 	// Discarded is set by the Q key (pressed twice): the caller must then
 	// skip the sidecar save and the stdout emit, leaving on-disk state as
-	// it was when the session started.
+	// it was when the session started. In-place e/E file edits are NOT
+	// rolled back — they were written to the .tex at submit time.
 	Discarded bool
-	// discardArmed is true after the first Q press; any other key disarms.
+	// discardArmed is true after the first Q press; any other key or
+	// mouse event disarms.
 	discardArmed bool
 
 	// mouseWheelEdge remembers the last no-op wheel event at a scroll edge.

@@ -499,7 +499,7 @@ func RenderHelpBody(width int, allowModifications bool) string {
 		"C opens old+new in external compare",
 		"? close help",
 		"q quit (save sidecar + emit annotations)",
-		"Q Q discard session changes and quit (no save, no emit)",
+		"Q Q discard annotations/marks and quit (no save, no emit; file edits stay)",
 	}
 	if !allowModifications {
 		lines = append(lines, "editing is currently disabled")

@@ -79,10 +79,20 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 
 	// Bare convenience form: a single existing file with no --base reviews
 	// the uncommitted changes of that file, like a bare `revdiff` reviews
-	// the working tree.
+	// the working tree. A single argument that fails to stat gets a
+	// file-access diagnostic here — falling through would misreport the
+	// documented primary form as an incomplete OLD NEW invocation.
 	if o.Base == "" && len(rest) == 1 {
-		if st, statErr := os.Stat(rest[0]); statErr == nil && !st.IsDir() {
+		st, statErr := os.Stat(rest[0])
+		switch {
+		case statErr == nil && !st.IsDir():
 			o.Base = "HEAD"
+		case statErr == nil:
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: %q is a directory, not a .tex file\n", rest[0])
+			return 2
+		default:
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: cannot read %q: %v (single-file form needs an existing file; for two endpoints pass OLD NEW)\n", rest[0], statErr)
+			return 2
 		}
 	}
 
@@ -166,10 +176,20 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	// PTY. Local kitty/ghostty only; see pdf.KittyFileTransferOK.
 	kittyAvailable := ui.KittyGraphicsAvailable()
 	kittyXferDir := ""
+	waitRenders := func(time.Duration) bool { return true }
 	if kittyAvailable && pdf.KittyFileTransferOK() {
 		if dir, dirErr := os.MkdirTemp("", "mrevdiff-kitty-"); dirErr == nil {
 			kittyXferDir = dir
-			defer func() { _ = os.RemoveAll(dir) }()
+			defer func() {
+				// Bubble Tea does not await in-flight Cmd goroutines on
+				// quit, so drain render/prefetch work before removing the
+				// directory they write into; retry once for stragglers.
+				waitRenders(2 * time.Second)
+				if rmErr := os.RemoveAll(dir); rmErr != nil {
+					time.Sleep(time.Second)
+					_ = os.RemoveAll(dir)
+				}
+			}()
 		}
 	}
 
@@ -197,6 +217,8 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		Status:             joinStatus(initialDiffStatus(o, review), pdfArtifacts.Status),
 	})
 
+	waitRenders = model.WaitPDFRenders
+
 	final, err := runDiffTUI(model, stdout, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: tui: %v\n", err)
@@ -217,9 +239,14 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		// Q-discard: leave the on-disk sidecar untouched and emit nothing.
 		return 0
 	}
-	if err := diffreview.SaveSidecarMerging(sidecarPath, finalSidecarBase, loadedSidecarMTime, finalSidecar); err != nil {
-		_, _ = fmt.Fprintf(stderr, "mrevdiff: save sidecar %q: %v\n", sidecarPath, err)
-		return 1
+	// A failed sidecar save must NOT gate the history net or the stdout
+	// emit — at this point the session's annotations exist only in memory,
+	// and losing all three sinks in the exact failure mode the safety net
+	// exists for (read-only dir, full disk, corrupt on-disk sidecar) would
+	// discard the user's work. Save what we can, then report the failure.
+	saveErr := diffreview.SaveSidecarMerging(sidecarPath, finalSidecarBase, loadedSidecarMTime, finalSidecar)
+	if saveErr != nil {
+		_, _ = fmt.Fprintf(stderr, "mrevdiff: save sidecar %q: %v\n", sidecarPath, saveErr)
 	}
 	if !o.NoHistory {
 		if histErr := saveHistory(o.HistoryDir, finalSidecar, finalReview); histErr != nil {
@@ -230,10 +257,22 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: emit: %v\n", err)
 		return 1
 	}
-	if o.ExitCodeOnAnnotations && finalSidecar != nil && len(finalSidecar.Annotations) > 0 {
+	if saveErr != nil {
+		return 1
+	}
+	// Detached annotations count as feedback: Emit just printed them, so
+	// the exit code must agree with the output (revdiff derives exit 10
+	// from the same string it emits).
+	if o.ExitCodeOnAnnotations && sidecarHasFeedback(finalSidecar) {
 		return exitCodeAnnotations
 	}
 	return 0
+}
+
+// sidecarHasFeedback reports whether the sidecar carries any review
+// feedback the emit output includes — attached or detached annotations.
+func sidecarHasFeedback(s *diffreview.Sidecar) bool {
+	return s != nil && (len(s.Annotations) > 0 || len(s.Detached) > 0)
 }
 
 func sidecarModTime(path string) time.Time {
@@ -249,7 +288,7 @@ func sidecarModTime(path string) time.Time {
 // silent history net. Skipped entirely when the review has no
 // annotations. Failures become the caller's stderr warning, never fatal.
 func saveHistory(historyDir string, sidecar *diffreview.Sidecar, review *diffreview.Review) error {
-	if sidecar == nil || len(sidecar.Annotations) == 0 {
+	if !sidecarHasFeedback(sidecar) {
 		return nil
 	}
 	if historyDir == "" {
@@ -259,8 +298,15 @@ func saveHistory(historyDir string, sidecar *diffreview.Sidecar, review *diffrev
 		}
 		historyDir = filepath.Join(home, ".config", "mrevdiff", "history")
 	}
+	// Bucket by project. A materialized NEW endpoint (git-spec form) lives
+	// under <repo>/.mrevdiff/<session>/<rev>/..., so its parent directory
+	// is the rev name, not the project — use the repo root instead.
 	project := "unknown"
-	if review != nil && review.New.Path != "" {
+	switch {
+	case review == nil:
+	case review.New.Materialized && review.New.RepoRoot != "":
+		project = filepath.Base(review.New.RepoRoot)
+	case review.New.Path != "":
 		project = filepath.Base(filepath.Dir(review.New.Path))
 	}
 	dir := filepath.Join(historyDir, project)

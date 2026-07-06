@@ -35,17 +35,19 @@ func LooksComplete(path string) bool {
 }
 
 // WaitStable polls path until its size stops changing between consecutive
-// polls (and is non-zero), or the timeout elapses. Catches the window where
-// latexmk is still streaming bytes into the PDF: a stat mid-write reports a
-// growing size, so two equal consecutive sizes are a cheap "writer is done
-// or paused" signal. Returns true when the size stabilised.
+// polls, or the timeout elapses. Catches the window where latexmk is still
+// streaming bytes into the PDF: a stat mid-write reports a growing size,
+// so two equal consecutive sizes are a cheap "writer is done or paused"
+// signal. A stable zero size counts — a dead 0-byte PDF should fail fast
+// via the caller's LooksComplete re-check instead of burning the full
+// timeout on every open. Returns true when the size stabilised.
 func WaitStable(path string, timeout time.Duration) bool {
 	const interval = 100 * time.Millisecond
 	deadline := time.Now().Add(timeout)
 	var lastSize int64 = -1
 	for {
 		st, err := os.Stat(path)
-		if err == nil && st.Size() > 0 && st.Size() == lastSize {
+		if err == nil && st.Size() == lastSize {
 			return true
 		}
 		if err == nil {
