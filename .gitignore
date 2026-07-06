@@ -1,0 +1,4 @@
+.bin/
+.mrevdiff/
+*.fmt-report.md
+.DS_Store

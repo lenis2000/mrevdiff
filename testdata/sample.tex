@@ -1,0 +1,64 @@
+\documentclass{amsart}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usepackage{cleveref}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem*{remark}{Remark}
+
+\begin{document}
+
+\title{A Sample Paper}
+\author{Test Author}
+\maketitle
+
+\begin{abstract}
+This is a short abstract. See Section~\ref{sec:main} for details.
+\end{abstract}
+
+\section{Main results}
+\label{sec:main}
+
+We begin with a foundational theorem, rooted in classical work \cite{GKP1994,Stanley2011}.
+
+\begin{theorem}
+\label{thm:main}
+For every integer $n \geq 0$, we have
+\[
+  \sum_{k=0}^{n} k = \frac{n(n+1)}{2}.
+\]
+This identity is well known.
+\end{theorem}
+
+\begin{proof}
+The proof proceeds by induction on $n$.
+
+Base case: $n=0$ yields $0=0$.
+
+Inductive step: assume the identity for $n$; then
+\begin{align}
+  \sum_{k=0}^{n+1} k
+    &= \sum_{k=0}^{n} k + (n+1) \\
+    &= \frac{n(n+1)}{2} + (n+1) \\
+    &= \frac{(n+1)(n+2)}{2}.
+\end{align}
+Compare with \cref{thm:main} and \ref{fig:diagram}; see also \ref{thm:missing}.
+\end{proof}
+
+\begin{figure}
+\label{fig:diagram}
+\begin{tikzpicture}
+  \draw (0,0) -- (1,1);
+\end{tikzpicture}
+\caption{A simple diagram.}
+\end{figure}
+
+% An end-of-document comment line.
+
+\begin{remark}
+No label here; uses $$x^2 + y^2 = z^2$$ as display.
+\end{remark}
+
+\end{document}

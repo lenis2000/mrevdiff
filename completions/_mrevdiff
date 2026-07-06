@@ -1,0 +1,30 @@
+#compdef mrevdiff
+# zsh completion for mrevdiff
+#
+# Install: copy or symlink this file to a directory in $fpath, e.g.
+#   /opt/homebrew/share/zsh/site-functions/_mrevdiff
+# then run `compinit` (or open a new shell) to pick it up.
+# If completions still show stale results, clear cache:
+#   rm -f ~/.zcompdump*; compinit
+
+_mrevdiff() {
+  _arguments \
+    '(- *)'{-V,--version}'[print version and exit]' \
+    '--base=[compare REV:path against working-tree path]:git revision:' \
+    '--no-build[skip latexmk build for the new endpoint]' \
+    '--draft[open TUI even when the new build fails]' \
+    '--build-cmd=[override latexmk command for the new endpoint]:command:' \
+    '--sidecar=[path to diff sidecar file]:sidecar file:_files' \
+    '--stdout=[format for diff annotations emitted on quit]:format:(md json none)' \
+    '--config=[path to config file]:config file:_files -g "*.toml"' \
+    '--noconfig[ignore config files; use built-in defaults]' \
+    '--open-compare[open old+new in external compare editor after startup]' \
+    '--allow-modifications[allow e/E edits to the new endpoint when it is a real file]' \
+    '--exit-code-on-annotations[exit 10 when the review produced annotations]' \
+    '--history-dir=[override the review history directory]:directory:_files -/' \
+    '--no-history[disable review history auto-save]' \
+    '1:old endpoint or paper:_files -g "*.tex"' \
+    '2:new endpoint:_files -g "*.tex"'
+}
+
+_mrevdiff "$@"
