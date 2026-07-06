@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/png"
 
 	"mrevdiff/pkg/synctex"
 )
@@ -71,7 +70,7 @@ func CropAtDPI(d *Doc, r synctex.Region, pad, dpi float64) ([]byte, error) {
 		cropped = dst
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, cropped); err != nil {
+	if err := fastPNG.Encode(&buf, cropped); err != nil {
 		return nil, fmt.Errorf("pdf: encode png: %w", err)
 	}
 	return buf.Bytes(), nil
@@ -159,7 +158,7 @@ func CropWithContextAtDPI(d *Doc, r synctex.Region, vpad, dpi float64) ([]byte, 
 		cropped = dst
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, cropped); err != nil {
+	if err := fastPNG.Encode(&buf, cropped); err != nil {
 		return nil, fmt.Errorf("pdf: encode png: %w", err)
 	}
 	return buf.Bytes(), nil

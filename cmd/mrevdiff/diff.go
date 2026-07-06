@@ -18,6 +18,7 @@ import (
 	"mrevdiff/pkg/diffreview"
 	"mrevdiff/pkg/diffui"
 	"mrevdiff/pkg/format"
+	"mrevdiff/pkg/pdf"
 	"mrevdiff/pkg/ui"
 )
 
@@ -160,6 +161,18 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: warning: load fmt-report: %v\n", issuesErr)
 	}
 
+	// kitty t=f file transmission: frames go to a session temp dir and the
+	// escape carries only the path — megabytes of base64 never cross the
+	// PTY. Local kitty/ghostty only; see pdf.KittyFileTransferOK.
+	kittyAvailable := ui.KittyGraphicsAvailable()
+	kittyXferDir := ""
+	if kittyAvailable && pdf.KittyFileTransferOK() {
+		if dir, dirErr := os.MkdirTemp("", "mrevdiff-kitty-"); dirErr == nil {
+			kittyXferDir = dir
+			defer func() { _ = os.RemoveAll(dir) }()
+		}
+	}
+
 	allowEdits := o.AllowModifications && review.New.Editable
 	model := diffui.New(review, diffui.Options{
 		Config:             cfg,
@@ -179,7 +192,8 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		Synctex:            pdfArtifacts.Synctex,
 		BuildStale:         pdfArtifacts.BuildStale,
 		PDFStatus:          pdfArtifactPDFStatus(pdfArtifacts),
-		KittyAvailable:     ui.KittyGraphicsAvailable(),
+		KittyAvailable:     kittyAvailable,
+		KittyXferDir:       kittyXferDir,
 		Status:             joinStatus(initialDiffStatus(o, review), pdfArtifacts.Status),
 	})
 

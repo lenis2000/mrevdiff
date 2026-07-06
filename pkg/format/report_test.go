@@ -16,9 +16,9 @@ func TestWriteAndLoadReport_RoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "paper.tex.fmt-report.md")
 
 	rpt := Report{
-		File: "paper.tex",
-		Date: time.Date(2026, 4, 24, 15, 32, 11, 0, time.UTC),
-		Tier: "safe+pdf-fix",
+		File:   "paper.tex",
+		Date:   time.Date(2026, 4, 24, 15, 32, 11, 0, time.UTC),
+		Tier:   "safe+pdf-fix",
 		Verify: "text-layer (ok)",
 		Rewrites: []RewriteGroup{
 			{RuleID: "space.trailing", Count: 14, Lines: []int{12, 88, 134, 200, 310}},
@@ -100,9 +100,9 @@ func TestWriteReport_TruncatesLongLineList(t *testing.T) {
 	path := filepath.Join(dir, "test.fmt-report.md")
 
 	rpt := Report{
-		File: "test.tex",
-		Date: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		Tier: "safe",
+		File:   "test.tex",
+		Date:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Tier:   "safe",
 		Verify: "skipped",
 		Rewrites: []RewriteGroup{
 			{RuleID: "space.trailing", Count: 10, Lines: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}},

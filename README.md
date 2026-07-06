@@ -57,6 +57,32 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | `q` | quit, save sidecar, emit annotations |
 | `Q Q` | discard session changes and quit |
 
+## PDF pane performance
+
+The PDF pane ports the fast-rendering work from
+[CLI-PDF-EPUB-reader](https://github.com/lenis2000/CLI-PDF-EPUB-reader):
+
+- **2× supersampling on ghostty/agterm** — these terminals report logical
+  pixels, so crops are rendered at doubled DPI (capped at 450) and
+  downsampled by the terminal into crisp retina glyphs
+  (`MREVDIFF_SUPERSAMPLE=1|2` overrides detection).
+- **kitty `t=f` file transmission** — on local kitty/ghostty the escape
+  carries only a file path (~200 bytes) instead of megabytes of base64
+  through the PTY (`MREVDIFF_KITTY_XFER=file|direct` overrides; disabled
+  automatically over SSH and under tmux).
+- **Flicker-free frame swaps** — each frame transmits under its own image
+  id; the previous frame is deleted *after* the new one paints, so the
+  pane is never blank between blocks or across lmkf rebuilds. During a
+  rebuild the last frame stays visible with progress in the status line.
+- **Frame cache + neighbor prefetch** — rendered frames are memoised, and
+  the blocks adjacent to the cursor are pre-rendered in the background so
+  `j`/`k` navigation is instant.
+- **BestSpeed PNG encoding** — frames are transient; encode latency is on
+  the interactive path, size is not.
+- **Torn-PDF guard** — a rebuilt PDF missing its `%%EOF` trailer (latexmk
+  mid-write) is never opened; the previous document stays up and the tool
+  retries.
+
 ## PDF build awareness
 
 mrevdiff never races the build pipeline: when

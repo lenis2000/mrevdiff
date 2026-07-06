@@ -137,12 +137,12 @@ content
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"Main Results":      "main-results",
-		"Main  Results!":    "main-results",
+		"Main Results":     "main-results",
+		"Main  Results!":   "main-results",
 		"Proof Of Theorem": "proof-of-theorem",
-		"":                  "",
-		"---":               "",
-		"A_B_C":             "a-b-c",
+		"":                 "",
+		"---":              "",
+		"A_B_C":            "a-b-c",
 	}
 	for in, want := range cases {
 		assert.Equal(t, want, slugify(in), "slugify(%q)", in)

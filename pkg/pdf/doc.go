@@ -27,12 +27,12 @@ const DefaultPageCacheSize = 16
 
 // Doc wraps an opened PDF with a bounded pixmap LRU and a Close guard.
 type Doc struct {
-	path    string
-	mtime   time.Time
-	doc     *fitz.Document
-	cache   *lruPages
-	mu      sync.Mutex
-	closed  bool
+	path   string
+	mtime  time.Time
+	doc    *fitz.Document
+	cache  *lruPages
+	mu     sync.Mutex
+	closed bool
 }
 
 // Open loads a PDF from disk. The caller must Close the result.

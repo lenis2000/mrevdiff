@@ -3,7 +3,6 @@ package diffui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -45,6 +44,7 @@ type PDFArtifacts struct {
 type diffPDFRenderMsg struct {
 	Generation int
 	Image      string
+	ImageID    uint32
 	Status     string
 }
 
@@ -68,6 +68,8 @@ type diffPDFRenderInputs struct {
 	HeightCells  int
 	CellWidthPx  float64
 	CellHeightPx float64
+	Cache        *pdfEscCache
+	ReloadGen    int
 }
 
 // PrepareNewPDF builds or opens the new endpoint's existing PDF artifacts.
@@ -138,7 +140,9 @@ func (m Model) startPDFReload(runBuild bool) (Model, tea.Cmd) {
 	gen := m.pdfReloadGen
 	oldPDF := m.PDF
 	buildCmd := m.BuildCmd
-	m.PDFImage = ""
+	// Keep the previous frame painted while the rebuild runs — blanking
+	// the pane here is exactly the mid-recompile flicker the id-based
+	// swap exists to avoid. The status line carries the progress.
 	m.PDFStatus = "rebuilding new PDF…"
 	m.BuildStale = true
 	if runBuild {
@@ -264,7 +268,9 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 		}
 	}
 	m.BuildStale = msg.BuildStale
-	m.PDFImage = ""
+	// The rebuilt document invalidates every cached frame; keep the last
+	// painted frame on screen until the fresh render replaces it.
+	m.escCache.clear()
 	m.PDFStatus = ""
 	if msg.Status != "" {
 		m.Status = msg.Status
@@ -311,74 +317,107 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		HeightCells:  h,
 		CellWidthPx:  cellW,
 		CellHeightPx: cellH,
+		Cache:        m.escCache,
+		ReloadGen:    m.pdfReloadGen,
 	}
+	key := diffPDFRenderKey(pair.New, m.pdfReloadGen, w, h, cellW, cellH)
+	neighbors := m.neighborNewBlocks(pair.ID)
 	return tea.Tick(diffPDFRenderDebounce, func(time.Time) tea.Msg {
-		image, status := renderDiffPDFForBlock(inputs)
-		return diffPDFRenderMsg{Generation: gen, Image: image, Status: status}
+		image, imageID, status := renderDiffPDFFrame(inputs, key)
+		if len(neighbors) > 0 {
+			go warmNeighborFrames(inputs, neighbors)
+		}
+		return diffPDFRenderMsg{Generation: gen, Image: image, ImageID: imageID, Status: status}
 	})
+}
+
+// neighborNewBlocks returns the new-side blocks of up to two pairs on each
+// side of pairID in review order — the prefetch set for j/k navigation.
+func (m Model) neighborNewBlocks(pairID string) []*parser.Block {
+	if m.Review == nil {
+		return nil
+	}
+	pairs := m.Review.Pairs
+	cur := -1
+	for i := range pairs {
+		if pairs[i].ID == pairID {
+			cur = i
+			break
+		}
+	}
+	if cur < 0 {
+		return nil
+	}
+	var out []*parser.Block
+	appendFrom := func(start, step int) {
+		taken := 0
+		for i := start; i >= 0 && i < len(pairs) && taken < 2; i += step {
+			if pairs[i].New != nil {
+				out = append(out, pairs[i].New)
+				taken++
+			}
+		}
+	}
+	appendFrom(cur+1, 1)
+	appendFrom(cur-1, -1)
+	return out
 }
 
 func (m Model) applyPDFRender(msg diffPDFRenderMsg) (Model, tea.Cmd) {
 	if msg.Generation != m.pdfGen {
 		return m, nil
 	}
-	m.PDFImage = msg.Image
+	image := msg.Image
+	// Flicker-free swap: paint the new frame first, then retire the
+	// previous image by id in the same write — the pane is never blank
+	// between frames (the old delete-all-then-draw order blanked it).
+	if image != "" && msg.ImageID != 0 && m.lastKittyID != 0 && m.lastKittyID != msg.ImageID {
+		image += pdf.KittyDeleteByID(m.lastKittyID)
+	}
+	if msg.ImageID != 0 {
+		m.lastKittyID = msg.ImageID
+	}
+	m.PDFImage = image
 	m.PDFStatus = msg.Status
 	return m, nil
-}
-
-func renderDiffPDFForBlock(in diffPDFRenderInputs) (string, string) {
-	if in.Block == nil || in.Block.StartLine < 1 {
-		return "", pdf.NoRegionPlaceholder
-	}
-	file := in.Block.File
-	if file == "" && in.Doc != nil {
-		file = in.Doc.File
-	}
-	region := in.Index.RegionForLines(file, in.Block.StartLine, in.Block.EndLine)
-	if region == nil || !pdf.HasExtent(*region) {
-		return "", pdf.NoRegionPlaceholder
-	}
-	paneWPx := int(float64(in.WidthCells) * in.CellWidthPx)
-	paneHPx := int(float64(in.HeightCells) * in.CellHeightPx)
-	png, err := pdf.CropFitted(in.PDF, *region, pdf.FitOptions{
-		PaneWidthPx:  paneWPx,
-		PaneHeightPx: paneHPx,
-	})
-	if err != nil {
-		return "", fmt.Sprintf("pdf: %v", err)
-	}
-	esc, err := pdf.RenderKitty(png, in.WidthCells, in.HeightCells)
-	if err != nil {
-		return "", fmt.Sprintf("pdf: %v", err)
-	}
-	return esc, ""
 }
 
 func (m Model) pdfPaneBody() string {
 	pair := m.CurrentPair()
 	if pair != nil && pair.New == nil {
 		if m.KittyAvailable {
-			return pdf.KittyDeleteAll + deletedPDFPlaceholder
+			return m.kittyClear() + deletedPDFPlaceholder
 		}
 		return deletedPDFPlaceholder
 	}
 	if !m.KittyAvailable {
 		return "(PDF pane requires kitty or ghostty terminal)"
 	}
-	if m.PDFImage != "" && !m.BuildStale {
+	// A stale frame beats a blank pane: during rebuild/reload the last
+	// rendered crop stays painted and the status line reports progress.
+	if m.PDFImage != "" {
 		return m.PDFImage
 	}
 	if m.PDFStatus != "" {
-		return pdf.KittyDeleteAll + m.PDFStatus
+		return m.kittyClear() + m.PDFStatus
 	}
 	if m.BuildStale {
-		return pdf.KittyDeleteAll + "(new PDF needs rebuild)"
+		return m.kittyClear() + "(new PDF needs rebuild)"
 	}
 	if m.PDF == nil || m.Synctex == nil {
-		return pdf.KittyDeleteAll + "(new PDF not loaded)"
+		return m.kittyClear() + "(new PDF not loaded)"
 	}
-	return pdf.KittyDeleteAll + pdf.NoRegionPlaceholder
+	return m.kittyClear() + pdf.NoRegionPlaceholder
+}
+
+// kittyClear retires the last painted frame before a text placeholder is
+// shown. Targeted by id when one is known (cheap, leaves other kitty
+// clients alone); delete-all otherwise.
+func (m Model) kittyClear() string {
+	if m.lastKittyID != 0 {
+		return pdf.KittyDeleteByID(m.lastKittyID)
+	}
+	return pdf.KittyDeleteAll
 }
 
 // diffPDFPaneCells keeps the original package-level geometry helper for tests
@@ -438,6 +477,19 @@ func applyBuildMetadata(review *diffreview.Review, res *build.Result) {
 func openDiffPDFPair(res *build.Result) (*pdf.Doc, *synctex.Index, string, bool) {
 	if res == nil {
 		return nil, nil, "", false
+	}
+	// Mid-recompile guard: latexmk rewrites the PDF in place, so a file
+	// that exists but has no %%EOF trailer is still being written. Give
+	// the writer a short window to finish, then refuse to open a torn
+	// file — the caller keeps the previous document and marks the build
+	// stale instead of feeding MuPDF a partial parse.
+	if res.PDFPath != "" {
+		if _, err := os.Stat(res.PDFPath); err == nil && !pdf.LooksComplete(res.PDFPath) {
+			pdf.WaitStable(res.PDFPath, 2*time.Second)
+			if !pdf.LooksComplete(res.PDFPath) {
+				return nil, nil, "(new PDF is still being written — press B to retry)", true
+			}
+		}
 	}
 	pdfDoc, pdfErr := pdf.Open(res.PDFPath)
 	idx, sxErr := synctex.Open(res.SyncTeXPath)

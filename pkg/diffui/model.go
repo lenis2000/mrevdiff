@@ -151,6 +151,12 @@ type Options struct {
 	KittyAvailable     bool
 	BuildStale         bool
 	PDFStatus          string
+	// KittyXferDir, when non-empty, enables kitty t=f file transmission:
+	// rendered frames are written as PNGs under this directory and the
+	// escape carries only the file path instead of base64 pixel data.
+	// The caller owns the directory (created before the TUI starts,
+	// removed after it exits).
+	KittyXferDir string
 }
 
 // Model is the Bubble Tea state for the semantic diff-review skeleton.
@@ -199,6 +205,12 @@ type Model struct {
 	pdfGen         int
 	pdfReloadGen   int
 	KittyAvailable bool
+	// lastKittyID is the image id of the frame currently painted in the
+	// PDF pane; the next frame deletes it *after* drawing (flicker-free
+	// swap). 0 = nothing painted yet.
+	lastKittyID uint32
+	// escCache memoises rendered frames (and owns their t=f files).
+	escCache *pdfEscCache
 
 	ShowHelp bool
 	// CountBuf accumulates digit prefixes for Vim-style diff motions (e.g. "10j").
@@ -284,6 +296,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		BuildStale:         opts.BuildStale,
 		PDFStatus:          opts.PDFStatus,
 		KittyAvailable:     opts.KittyAvailable,
+		escCache:           newPDFEscCache(opts.KittyXferDir),
 		SourceLineCursor:   1,
 		Layout:             LayoutNoPDF,
 		Focus:              PaneOutline,

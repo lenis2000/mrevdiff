@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/png"
 	"math"
 
 	"mrevdiff/pkg/synctex"
@@ -229,10 +228,19 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 		return nil, fmt.Errorf("pdf: degenerate vertical crop (%.2f pt)", cropHPt)
 	}
 
-	// Choose render DPI for pane size.
+	// Choose render DPI for pane size. On logical-pixel terminals
+	// (ghostty/agterm) the pane pixel math undercounts the physical
+	// display by 2×, so multiply the DPI back up — same cell footprint,
+	// denser pixels, no retina blur.
 	dpi := DefaultCropDPI
 	if opts.PaneWidthPx > 0 && opts.PaneHeightPx > 0 {
 		dpi = SuggestDPI(cropWPt, cropHPt, opts.PaneWidthPx, opts.PaneHeightPx)
+	}
+	if ss := SuperSampleFactor(); ss > 1 {
+		dpi *= ss
+		if dpi > fitMaxDPISupersampled {
+			dpi = fitMaxDPISupersampled
+		}
 	}
 
 	img, err := d.Page(r.Page-1, dpi)
@@ -266,7 +274,7 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 
 	cropped := subImage(img, image.Rect(px0, py0, px1, py1))
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, cropped); err != nil {
+	if err := fastPNG.Encode(&buf, cropped); err != nil {
 		return nil, fmt.Errorf("pdf: encode png: %w", err)
 	}
 	return buf.Bytes(), nil

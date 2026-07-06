@@ -313,10 +313,10 @@ func TestRun_EmptyTex(t *testing.T) {
 
 func TestRun_BuildErrorString(t *testing.T) {
 	e := &BuildError{
-		TexPath:   "foo.tex",
-		Reason:    "command failed",
+		TexPath:  "foo.tex",
+		Reason:   "command failed",
 		LogIssue: "! oops",
-		LogTail:   []string{"line1", "line2"},
+		LogTail:  []string{"line1", "line2"},
 	}
 	s := e.Error()
 	assert.Contains(t, s, "foo.tex")
