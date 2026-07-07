@@ -145,6 +145,26 @@ TOML config at `~/.config/mrevdiff/config.toml`, overridden by the
 nearest `.mrevdiff.toml` up to the git root. Keys: `build_cmd`, `theme`
 (`dark`/`light`), `theorem_envs`, `figure_envs`.
 
+### Keybindings
+
+Keys dispatch to named **actions**, so any binding is remappable. The
+keymap is: built-in defaults → the config `[keybinds]` table → a
+keybindings file (the file wins). The file lives at
+`~/.config/mrevdiff/keybindings` (override with `--keys` /
+`MREVDIFF_KEYS`), one directive per line:
+
+```
+map ; next            # ; advances a pair
+map ctrl+n search-next
+unmap x               # disable the blink comparator
+```
+
+`mrevdiff --dump-keys` prints the full action catalog and the current
+bindings as a template. The `[keybinds]` TOML table does the same with
+`"key" = "action"` entries. The count prefix (`10j`) and the `gg` leader
+are fixed motion mechanics and are not remappable; `ctrl+c` always quits.
+The help overlay (`?`) always shows your live bindings.
+
 Environment: `MREVDIFF_THEME`, `MREVDIFF_FORCE_KITTY`,
 `MREVDIFF_COMPARE_EDITOR` (for `C`; falls back to `opendiff`, `zed`),
 `$EDITOR` (for `E`), `MREVDIFF_EXIT_CODE_ON_ANNOTATIONS`,

@@ -25,8 +25,12 @@ type Config struct {
 	BuildCmd string `toml:"build_cmd"`
 
 	// UI overrides.
-	Theme    string            `toml:"theme"`
-	Colors   map[string]string `toml:"colors"`
+	Theme  string            `toml:"theme"`
+	Colors map[string]string `toml:"colors"`
+	// Keybinds maps a key to an action name (e.g. ";" = "next"); it is a
+	// convenience overlay applied before the keybindings file. See
+	// `mrevdiff --dump-keys` for the action catalog. (Colors remains
+	// parsed but unused.)
 	Keybinds map[string]string `toml:"keybinds"`
 }
 

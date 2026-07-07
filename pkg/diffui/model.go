@@ -166,6 +166,8 @@ type Options struct {
 	// --description-file) shown in the i info popup — the agent's note to
 	// the returning human about what this review pass changed and why.
 	Description string
+	// Keymap resolves keys to actions; nil means the default bindings.
+	Keymap *Keymap
 	// KittyXferDir, when non-empty, enables kitty t=f file transmission:
 	// rendered frames are written as PNGs under this directory and the
 	// escape carries only the file path instead of base64 pixel data.
@@ -287,6 +289,7 @@ type Model struct {
 	AnnList     *annListState
 	ShowInfo    bool
 	Description string
+	Keymap      *Keymap
 
 	EditUndo []EditSnapshot
 	EditRedo []EditSnapshot
@@ -353,6 +356,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		escCache:           newPDFEscCache(opts.KittyXferDir),
 		pageLayout:         newPageLayoutCache(),
 		Description:        opts.Description,
+		Keymap:             opts.Keymap,
 		SourceLineCursor:   1,
 		Layout:             LayoutNoPDF,
 		Focus:              PaneOutline,
@@ -360,6 +364,9 @@ func New(review *diffreview.Review, opts Options) Model {
 		PDFFrac:            defaultPDFFrac,
 		StackedTopFrac:     defaultStackedTopFrac,
 		SourceSplitFrac:    defaultSourceSplitFrac,
+	}
+	if m.Keymap == nil {
+		m.Keymap = NewKeymap()
 	}
 	if side.CursorPairID != "" {
 		if idx := pairIndexByID(review, side.CursorPairID); idx >= 0 {

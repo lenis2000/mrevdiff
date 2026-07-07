@@ -149,7 +149,8 @@ func TestFoldedCursorNavigationDoesNotSkipNextVisiblePair(t *testing.T) {
 func TestHelpIncludesDiffSpecificKeys(t *testing.T) {
 	// Narrow width forces the single-column path so substrings stay on
 	// one physical line (the two-column path pads between the columns).
-	help := RenderHelpBody(80, false)
+	m := New(fixtureReview(), Options{})
+	help := m.RenderHelpBody(80)
 	for _, needle := range []string{
 		"inline single-line edit",
 		"$EDITOR at current line",
@@ -169,12 +170,30 @@ func TestHelpIncludesDiffSpecificKeys(t *testing.T) {
 			t.Fatalf("help missing %q in:\n%s", needle, help)
 		}
 	}
+	// The help must show the live bound keys — default 'x' for the blink
+	// comparator here.
+	if !strings.Contains(help, "x") {
+		t.Fatalf("help should show the blink key")
+	}
 	// The two-column render must include the same sections.
-	wide := RenderHelpBody(140, true)
+	mAllow := New(fixtureReview(), Options{AllowModifications: true})
+	wide := mAllow.RenderHelpBody(140)
 	for _, needle := range []string{"NAVIGATE", "REVIEW", "EDIT (new file)", "PDF", "LAYOUT", "QUIT"} {
 		if !strings.Contains(wide, needle) {
 			t.Fatalf("wide help missing section %q in:\n%s", needle, wide)
 		}
+	}
+}
+
+// TestHelpReflectsRemappedKeys pins that the overlay shows the user's
+// bindings, not the defaults.
+func TestHelpReflectsRemappedKeys(t *testing.T) {
+	km := NewKeymap()
+	km.ApplyFile("unmap x\nmap ctrl+b pdf-blink")
+	m := New(fixtureReview(), Options{Keymap: km})
+	help := m.RenderHelpBody(80)
+	if !strings.Contains(help, "ctrl+b") {
+		t.Fatalf("help should show the remapped blink key ctrl+b:\n%s", help)
 	}
 }
 

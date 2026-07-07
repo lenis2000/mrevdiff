@@ -630,55 +630,68 @@ type helpSection struct {
 	rows  [][2]string
 }
 
-func helpSections(allowModifications bool) []helpSection {
+// helpSections builds the help overlay from the live keymap, so remapped
+// keys are shown accurately. The gg leader and count prefix are literal
+// (not remappable) and shown as-is.
+func (m Model) helpSections() []helpSection {
+	k := func(a Action) string {
+		keys := m.Keymap.KeysFor(a)
+		if len(keys) == 0 {
+			return "(unbound)"
+		}
+		return strings.Join(keys, "/")
+	}
+	pair := func(a, b Action) string { return k(a) + " / " + k(b) }
+
 	editTitle := "EDIT (new file)"
-	if !allowModifications {
+	if !m.AllowModifications {
 		editTitle = "EDIT (disabled — rerun with --allow-modifications)"
 	}
 	return []helpSection{
 		{"NAVIGATE", [][2]string{
-			{"j/k ↑/↓", "move by change pair (counts: 10j)"},
-			{"J/K", "jump 10 down / 5 up pairs"},
-			{"gg / G", "first / last pair"},
-			{"{ / }", "previous / next section"},
-			{"[ / ]", "previous / next source line (PDF anchor)"},
-			{"/", "search pairs — text, labels, IDs (n/N steps)"},
-			{"z", "fold/unfold outline group"},
-			{"h/l ←/→", "focus pane"},
+			{pair(ActionPrev, ActionNext), "previous / next change pair (or source line)"},
+			{pair(ActionJumpUp, ActionJumpDown), "jump 5 up / 10 down pairs"},
+			{"gg / " + k(ActionLast), "first / last pair"},
+			{"0-9", "repeat count prefix (e.g. 10 then next)"},
+			{pair(ActionSectionPrev, ActionSectionNext), "previous / next section"},
+			{pair(ActionSourceLinePrev, ActionSourceLineNext), "previous / next source line (PDF anchor)"},
+			{k(ActionSearch) + " " + pair(ActionSearchPrev, ActionSearchNext), "search / prev / next match"},
+			{k(ActionFoldToggle), "fold/unfold outline group"},
+			{pair(ActionFocusPrev, ActionFocusNext), "focus previous / next pane"},
 		}},
 		{"REVIEW", [][2]string{
-			{"space", "mark reviewed"},
-			{"a", "annotate pair"},
-			{"ctrl+a", "edit annotation"},
-			{"d", "delete annotation"},
-			{"@", "annotation list (enter jumps, d deletes)"},
-			{"y", "copy selected change (side follows focus)"},
-			{"f", "cycle filter"},
-			{"m", "semantic / coalesced diff regime"},
-			{"i", "review scope + agent description"},
+			{k(ActionReviewToggle), "mark reviewed"},
+			{k(ActionAnnotate), "annotate pair"},
+			{k(ActionAnnotateEdit), "edit annotation"},
+			{k(ActionAnnotateDelete), "delete annotation"},
+			{k(ActionAnnotationList), "annotation list (enter jumps, d deletes)"},
+			{k(ActionCopy), "copy selected change (side follows focus)"},
+			{k(ActionFilterCycle), "cycle filter"},
+			{k(ActionRegimeToggle), "semantic / coalesced diff regime"},
+			{k(ActionInfo), "review scope + agent description"},
 		}},
 		{editTitle, [][2]string{
-			{"e", "inline single-line edit"},
-			{"E", "$EDITOR at current line"},
-			{"u / ctrl+r", "undo / redo in-place edits"},
+			{k(ActionEditInline), "inline single-line edit"},
+			{k(ActionEditExternal), "$EDITOR at current line"},
+			{pair(ActionUndo, ActionRedo), "undo / redo in-place edits"},
 		}},
 		{"PDF", [][2]string{
-			{"F", "full-page preview (region marked) ↔ region crop"},
-			{"x", "blink comparator: flip old/new PDF (builds old once)"},
-			{"S", "Skim forward-search at line (never compiles)"},
-			{"P", "open new PDF in Preview"},
-			{"B", "re-diff source + rebuild/reload PDF"},
-			{"C", "old vs new in external compare"},
+			{k(ActionFullPage), "full-page preview (region marked) ↔ region crop"},
+			{k(ActionBlink), "blink comparator: flip old/new PDF (builds old once)"},
+			{k(ActionSkim), "Skim forward-search at line (never compiles)"},
+			{k(ActionPreview), "open new PDF in Preview"},
+			{k(ActionReload), "re-diff source + rebuild/reload PDF"},
+			{k(ActionCompare), "old vs new in external compare"},
 		}},
 		{"LAYOUT", [][2]string{
-			{"\\", "cycle: full·side → full·below → sources+PDF → new+PDF → no PDF"},
-			{"|", "PDF-only zoom (toggle)"},
-			{"< / >", "resize focused pane / source split"},
+			{k(ActionLayoutCycle), "cycle: full·side → full·below → sources+PDF → new+PDF → no PDF"},
+			{k(ActionPDFZoom), "PDF-only zoom (toggle)"},
+			{pair(ActionResizeShrink, ActionResizeGrow), "resize focused pane / source split"},
 		}},
 		{"QUIT", [][2]string{
-			{"q", "quit — save sidecar, emit annotations"},
-			{"Q Q", "discard annotations/marks (file edits stay)"},
-			{"?", "close help"},
+			{k(ActionQuit), "quit — save sidecar, emit annotations"},
+			{k(ActionDiscard) + " " + k(ActionDiscard), "discard annotations/marks (file edits stay)"},
+			{k(ActionHelp), "close help · remap keys: mrevdiff --dump-keys"},
 		}},
 	}
 }
@@ -699,10 +712,10 @@ func renderHelpSection(s helpSection, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// RenderHelpBody returns the sectioned help text: two balanced columns
-// when the width allows, a single column otherwise.
-func RenderHelpBody(width int, allowModifications bool) string {
-	sections := helpSections(allowModifications)
+// RenderHelpBody returns the sectioned help text (keymap-driven): two
+// balanced columns when the width allows, a single column otherwise.
+func (m Model) RenderHelpBody(width int) string {
+	sections := m.helpSections()
 	if width < 100 {
 		parts := make([]string, 0, len(sections))
 		for _, s := range sections {
@@ -740,7 +753,7 @@ func (m Model) renderHelpOverlay(width, bodyHeight int) string {
 	if inner < 20 {
 		inner = 20
 	}
-	body := "mrevdiff — keys\n\n" + RenderHelpBody(inner, m.AllowModifications)
+	body := "mrevdiff — keys\n\n" + m.RenderHelpBody(inner)
 	box := m.Styles.PaneFocused.
 		Border(lipgloss.RoundedBorder()).
 		Padding(1, 3).

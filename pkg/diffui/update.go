@@ -103,12 +103,21 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Status = ""
 		return m, nil
 	}
-	if key == "ctrl+c" || key == "q" {
+	// ctrl+c is a hard quit and is never remappable (safety hatch).
+	if key == "ctrl+c" {
 		m.CountBuf = ""
 		m.quitting = true
 		return m, tea.Quit
 	}
-	if key == "Q" {
+
+	action := m.Keymap.Lookup(key)
+
+	if action == ActionQuit {
+		m.CountBuf = ""
+		m.quitting = true
+		return m, tea.Quit
+	}
+	if action == ActionDiscard {
 		m.CountBuf = ""
 		if m.discardArmed {
 			m.Discarded = true
@@ -116,11 +125,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.discardArmed = true
-		m.Status = "press Q again to quit discarding annotations/marks — in-place file edits stay (q keeps everything)"
+		m.Status = "press again to quit discarding annotations/marks — in-place file edits stay (q keeps everything)"
 		return m, nil
 	}
 	m.discardArmed = false
-	if key == "?" {
+	if action == ActionHelp {
 		m.ShowHelp = !m.ShowHelp
 		m.CountBuf = ""
 		m.pendingG = false
@@ -131,6 +140,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The gg leader and digit count prefix are vim motion mechanics, not
+	// commands — handled literally, never remapped.
 	if m.pendingG {
 		m.pendingG = false
 		if key == "g" {
@@ -139,7 +150,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.withPDFRender()
 		}
 	}
-	if isDiffMotionDigit(key) {
+	if isDiffMotionDigit(key) && action == ActionNone {
 		if key == "0" && m.CountBuf == "" {
 			return m, nil
 		}
@@ -148,46 +159,50 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	count := parseDiffMotionCount(m.CountBuf)
 	m.CountBuf = ""
+	if key == "g" && action == ActionNone {
+		m.pendingG = true
+		return m, nil
+	}
 
-	switch key {
-	case "f":
+	switch action {
+	case ActionFilterCycle:
 		m.Filter = CycleFilter(m.Filter)
 		m.snapCursor()
 		return m.withPDFRender()
-	case "m":
+	case ActionRegimeToggle:
 		m = m.toggleDiffRegime()
 		return m.withPDFRender()
-	case "z":
+	case ActionFoldToggle:
 		m.toggleOutlineFold()
 		return m, nil
-	case " ", "space":
+	case ActionReviewToggle:
 		m = m.toggleReviewed()
 		return m.withPDFRender()
-	case "a":
+	case ActionAnnotate:
 		return m.startAnnotation(false)
-	case "ctrl+a":
+	case ActionAnnotateEdit:
 		return m.startAnnotation(true)
-	case "d":
+	case ActionAnnotateDelete:
 		return m.beginDelete(), nil
-	case "y":
+	case ActionCopy:
 		return m.copySelectedChunk()
-	case "E":
+	case ActionEditExternal:
 		return m.editInExternalEditor()
-	case "e":
+	case ActionEditInline:
 		return m.startLineEdit()
-	case "C":
+	case ActionCompare:
 		return m.openCompareEditor()
-	case "P":
+	case ActionPreview:
 		return m.openPreviewPDF()
-	case "S", "s":
+	case ActionSkim:
 		return m.openSkimAtLine()
-	case "x":
+	case ActionBlink:
 		return m.toggleOldPDF()
-	case "F":
+	case ActionFullPage:
 		m.pdfFullPage = !m.pdfFullPage
 		m.PDFImage = ""
 		if m.pdfFullPage {
-			m.Status = "PDF: full page (F crops to region)"
+			m.Status = "PDF: full page (toggle key crops to region)"
 			if m.Layout == LayoutNoPDF {
 				m.Status += " — press \\ or | to show the PDF pane"
 			}
@@ -195,93 +210,91 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = "PDF: region crop"
 		}
 		return m.withPDFRender()
-	case "/":
+	case ActionSearch:
 		return m.startSearch()
-	case "n":
+	case ActionSearchNext:
 		return m.nextMatch(1)
-	case "N":
+	case ActionSearchPrev:
 		return m.nextMatch(-1)
-	case "@":
+	case ActionAnnotationList:
 		return m.openAnnList()
-	case "i":
+	case ActionInfo:
 		m.ShowInfo = true
 		return m, nil
-	case "\\":
+	case ActionLayoutCycle:
 		m.cycleLayout()
 		m.PDFImage = ""
 		return m.withPDFRender()
-	case "|":
+	case ActionPDFZoom:
 		m.togglePDFOnly()
 		m.PDFImage = ""
 		return m.withPDFRender()
-	case "h", "left":
+	case ActionFocusPrev:
 		m.moveFocus(-1)
 		return m, nil
-	case "l", "right":
+	case ActionFocusNext:
 		m.moveFocus(1)
 		return m, nil
-	case "<":
+	case ActionResizeShrink:
 		if m.resizeFocusedPane(-1) {
 			m.PDFImage = ""
 			m.Status = "resized " + m.Focus.String()
 			return m.withPDFRender()
 		}
 		return m, nil
-	case ">":
+	case ActionResizeGrow:
 		if m.resizeFocusedPane(1) {
 			m.PDFImage = ""
 			m.Status = "resized " + m.Focus.String()
 			return m.withPDFRender()
 		}
 		return m, nil
-	case "B":
+	case ActionReload:
 		m = m.reloadAfterEdit("source reloaded")
 		if strings.HasPrefix(m.Status, "reload:") {
 			return m, nil
 		}
 		return m.startPDFReload(true)
-	case "u":
+	case ActionUndo:
 		return m.undoEdit()
-	case "ctrl+r":
+	case ActionRedo:
 		return m.redoEdit()
-	case "[":
+	case ActionSourceLinePrev:
 		m.moveSourceLine(-count)
 		return m.withPDFRender()
-	case "]":
+	case ActionSourceLineNext:
 		m.moveSourceLine(count)
 		return m.withPDFRender()
-	case "j", "down":
+	case ActionNext:
 		if m.Focus == PaneOldSource || m.Focus == PaneNewSource {
 			m.moveSourceLine(count)
 		} else {
 			m.moveDiffChunkOrPairRepeat(1, count)
 		}
 		return m.withPDFRender()
-	case "k", "up":
+	case ActionPrev:
 		if m.Focus == PaneOldSource || m.Focus == PaneNewSource {
 			m.moveSourceLine(-count)
 		} else {
 			m.moveDiffChunkOrPairRepeat(-1, count)
 		}
 		return m.withPDFRender()
-	case "J", "pgdown":
+	case ActionJumpDown:
 		m.moveVisible(diffJumpDownCount * count)
 		return m.withPDFRender()
-	case "K", "pgup":
+	case ActionJumpUp:
 		m.moveVisible(-diffJumpUpCount * count)
 		return m.withPDFRender()
-	case "g":
-		m.pendingG = true
-	case "home":
+	case ActionFirst:
 		m.moveToFirst()
 		return m.withPDFRender()
-	case "G", "end":
+	case ActionLast:
 		m.moveToLast()
 		return m.withPDFRender()
-	case "}":
+	case ActionSectionNext:
 		m.moveSectionRepeat(1, count)
 		return m.withPDFRender()
-	case "{":
+	case ActionSectionPrev:
 		m.moveSectionRepeat(-1, count)
 		return m.withPDFRender()
 	}

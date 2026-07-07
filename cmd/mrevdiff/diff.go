@@ -46,10 +46,46 @@ type diffOpts struct {
 	Description     string `long:"description" description:"markdown context shown in the i info popup (e.g. what an agent changed and why)"`
 	DescriptionFile string `long:"description-file" description:"file with markdown context for the i info popup"`
 
+	Keys     string `long:"keys" env:"MREVDIFF_KEYS" description:"path to a keybindings file (default ~/.config/mrevdiff/keybindings)"`
+	DumpKeys bool   `long:"dump-keys" description:"print the effective keybindings as a template and exit"`
+
 	ExitCodeOnAnnotations bool   `long:"exit-code-on-annotations" env:"MREVDIFF_EXIT_CODE_ON_ANNOTATIONS" description:"exit 10 when the review produced annotations"`
 	HistoryDir            string `long:"history-dir" env:"MREVDIFF_HISTORY_DIR" description:"override the review history directory (default ~/.config/mrevdiff/history)"`
 	NoHistory             bool   `long:"no-history" description:"disable review history auto-save"`
 	Version               bool   `long:"version" short:"V" description:"print version and exit"`
+}
+
+// loadKeymap builds the effective keymap: defaults, then the config
+// [keybinds] table, then the keybindings file (file wins). The file is
+// --keys / MREVDIFF_KEYS, else ~/.config/mrevdiff/keybindings if present.
+// Warnings go to stderr; a bad binding never blocks the review.
+func loadKeymap(cfg *ui.Config, explicit string, stderr io.Writer) *diffui.Keymap {
+	km := diffui.NewKeymap()
+	if cfg != nil && len(cfg.Keybinds) > 0 {
+		for _, w := range km.ApplyConfig(cfg.Keybinds) {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: %s\n", w)
+		}
+	}
+	path := explicit
+	if path == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			candidate := filepath.Join(home, ".config", "mrevdiff", "keybindings")
+			if _, err := os.Stat(candidate); err == nil {
+				path = candidate
+			}
+		}
+	}
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: keybindings %q: %v\n", path, err)
+			return km
+		}
+		for _, w := range km.ApplyFile(string(data)) {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: keybindings %q: %s\n", path, w)
+		}
+	}
+	return km
 }
 
 var runDiffTUI = func(model tea.Model, stdout, stderr io.Writer) (tea.Model, error) {
@@ -77,6 +113,17 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.Version {
 		_, _ = fmt.Fprintf(stdout, "mrevdiff %s\n", version)
+		return 0
+	}
+	if o.DumpKeys {
+		// Keymap depends on config ([keybinds]) but not on endpoints, so
+		// --dump-keys works without a paper argument.
+		cfg, cfgErr := ui.LoadConfig(o.Config, o.NoConfig)
+		if cfgErr != nil {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: %v\n", cfgErr)
+			return 1
+		}
+		_, _ = fmt.Fprint(stdout, loadKeymap(cfg, o.Keys, stderr).Dump())
 		return 0
 	}
 
@@ -125,6 +172,8 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	cfg = ui.ApplyThemeEnv(cfg)
+
+	keymap := loadKeymap(cfg, o.Keys, stderr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -242,6 +291,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		KittyAvailable:     kittyAvailable,
 		KittyXferDir:       kittyXferDir,
 		Description:        description,
+		Keymap:             keymap,
 		Status:             joinStatus(initialDiffStatus(o, review), pdfArtifacts.Status),
 	})
 
