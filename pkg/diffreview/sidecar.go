@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"mrevdiff/pkg/persist"
+	"github.com/lenis2000/mrevdiff/pkg/persist"
 )
 
 // Annotation is one diff-mode note attached to a semantic old/new pair.

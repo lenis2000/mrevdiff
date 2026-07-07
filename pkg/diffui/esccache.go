@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"mrevdiff/pkg/parser"
-	"mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
 )
 
 // pdfEscCacheMax bounds the rendered-frame cache by entry count, and

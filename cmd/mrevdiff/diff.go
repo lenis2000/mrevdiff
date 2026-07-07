@@ -15,11 +15,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jessevdk/go-flags"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/diffui"
-	"mrevdiff/pkg/format"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffui"
+	"github.com/lenis2000/mrevdiff/pkg/format"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 // exitCodeAnnotations mirrors revdiff's convention: with

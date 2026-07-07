@@ -1,4 +1,4 @@
-module mrevdiff
+module github.com/lenis2000/mrevdiff
 
 go 1.26
 

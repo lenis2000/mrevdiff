@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
 )
 
 func TestWideViewDefaultsToFileMergeLayoutWithoutPDFPane(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
 )
 
 func TestDiffExternalEditOpensNewPathOnly(t *testing.T) {

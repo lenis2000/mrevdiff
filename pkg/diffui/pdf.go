@@ -10,12 +10,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/build"
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/build"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 const (

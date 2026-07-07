@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 func TestAlignLabeledTheoremSurvivesLineDriftAndTextEdits(t *testing.T) {

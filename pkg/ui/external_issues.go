@@ -3,8 +3,8 @@ package ui
 import (
 	"os"
 
-	"mrevdiff/pkg/format"
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/format"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 // LoadExternalIssues loads a fmt-report.md file (produced by `mreview fmt`)

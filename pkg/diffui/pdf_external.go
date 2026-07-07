@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/build"
+	"github.com/lenis2000/mrevdiff/pkg/build"
 )
 
 const diffSkimDisplaylinePath = "/Applications/Skim.app/Contents/SharedSupport/displayline"

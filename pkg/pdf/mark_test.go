@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 func openSamplePDF(t *testing.T) (*Doc, synctex.Region) {

@@ -6,7 +6,7 @@ import (
 	"image"
 	"image/draw"
 
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // DefaultCropDPI is the render resolution used for crops. 200 strikes a

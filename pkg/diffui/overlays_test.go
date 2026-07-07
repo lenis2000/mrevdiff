@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
 )
 
 func typeSearch(t *testing.T, m Model, query string) Model {

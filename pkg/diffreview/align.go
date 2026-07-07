@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 // PairStatus describes how one semantic block changed between endpoints.

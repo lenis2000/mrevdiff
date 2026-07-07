@@ -4,9 +4,9 @@ import (
 	"sort"
 	"sync"
 
-	"mrevdiff/pkg/parser"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // pageLayoutCache memoizes per-page column detection (ported from

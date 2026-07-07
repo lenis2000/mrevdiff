@@ -6,7 +6,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 var writeDiffClipboard = clipboard.WriteAll

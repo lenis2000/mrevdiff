@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pmezard/go-difflib/difflib"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 type sourcePartKind int

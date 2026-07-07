@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 const (

@@ -12,9 +12,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/diffui"
-	"mrevdiff/pkg/format"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffui"
+	"github.com/lenis2000/mrevdiff/pkg/format"
 )
 
 func withStubDiffTUI(t *testing.T) *tea.Model {

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"mrevdiff/pkg/parser"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // openSampleArtifacts loads the repo-level sample PDF + SyncTeX pair and

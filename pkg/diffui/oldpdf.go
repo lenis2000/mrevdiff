@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/build"
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/build"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // PDF pane sides for the x blink comparator.

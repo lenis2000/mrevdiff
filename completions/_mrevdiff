@@ -20,6 +20,10 @@ _mrevdiff() {
     '--noconfig[ignore config files; use built-in defaults]' \
     '--open-compare[open old+new in external compare editor after startup]' \
     '--allow-modifications[allow e/E edits to the new endpoint when it is a real file]' \
+    '--description=[markdown context shown in the i info popup]:text:' \
+    '--description-file=[file with markdown context for the i info popup]:file:_files' \
+    '--keys=[path to a keybindings file]:keybindings file:_files' \
+    '--dump-keys[print the effective keybindings as a template and exit]' \
     '--exit-code-on-annotations[exit 10 when the review produced annotations]' \
     '--history-dir=[override the review history directory]:directory:_files -/' \
     '--no-history[disable review history auto-save]' \

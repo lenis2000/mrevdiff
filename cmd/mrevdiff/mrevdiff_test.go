@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/diffui"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffui"
 )
 
 // chdir changes the working directory for the duration of t, restoring

@@ -10,9 +10,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 var compareEditorCandidates = []string{"opendiff", "zed"}

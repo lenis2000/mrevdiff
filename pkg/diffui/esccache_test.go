@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 func TestDiffPDFRenderKeyDistinguishesGeometryAndGeneration(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 // OutlineRow is one visible row in the diff outline. Selectable rows point to

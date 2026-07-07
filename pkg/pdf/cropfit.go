@@ -8,7 +8,7 @@ import (
 	"image/draw"
 	"math"
 
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // FitOptions describes the target pane that a crop should fill. CropFitted

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"mrevdiff/pkg/persist"
+	"github.com/lenis2000/mrevdiff/pkg/persist"
 )
 
 // Report holds the structured content of a paper.tex.fmt-report.md file.

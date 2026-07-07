@@ -10,9 +10,9 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/persist"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/persist"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 var diffEditorCandidates = []string{"nvim", "vim", "vi", "nano"}

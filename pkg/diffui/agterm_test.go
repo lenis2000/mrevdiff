@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
 )
 
 // forceAgterm makes the integration report available with a recording

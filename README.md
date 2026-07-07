@@ -13,6 +13,13 @@ normalized-source hash, and finally by fuzzy token match. You review
 *change pairs*, not hunks — with the freshly built PDF crop for the
 current block rendered next to the source via kitty graphics.
 
+![mrevdiff reviewing a paper revision: outline, old source, and new source with intra-line word diff](assets/screenshot.png)
+
+The PDF pane renders the current block's page region inline (kitty
+graphics), so you see the change and its typeset result together:
+
+![the PDF pane rendering the current block's page region below the source diff](assets/pdf-pane.png)
+
 ## Usage
 
 ```bash
@@ -185,7 +192,13 @@ history vars are new to mrevdiff and have no `MREVIEW_*` equivalent.
 ## Install
 
 ```bash
-make install     # builds and installs to ~/bin/mrevdiff + zsh completion
+go install github.com/lenis2000/mrevdiff/cmd/mrevdiff@latest
+```
+
+or from a clone (also installs the zsh completion):
+
+```bash
+make install     # builds and installs to ~/bin/mrevdiff
 ```
 
 ## Development
@@ -198,3 +211,12 @@ make lint        # go vet
 The lint diagnostics surfaced in the outline (issue markers) are read
 from `<paper>.tex.fmt-report.md` files produced by `mreview fmt` — the
 two tools compose but neither requires the other.
+
+## License
+
+[MIT](LICENSE) © Leonid Petrov. Peeled from
+[mreview](https://github.com/lenis2000/mreview); the PDF-rendering
+optimizations are ported from
+[CLI-PDF-EPUB-reader](https://github.com/lenis2000/CLI-PDF-EPUB-reader)
+(MIT), and the annotation/stdout UX follows
+[revdiff](https://github.com/umputun/revdiff) (MIT).

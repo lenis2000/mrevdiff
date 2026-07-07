@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 func openFixture(t *testing.T) *Doc {

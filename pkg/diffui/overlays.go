@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
 // searchState drives the / search across pair sources and labels.

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"mrevdiff/pkg/build"
+	"github.com/lenis2000/mrevdiff/pkg/build"
 )
 
 // LmkfRebuildStatus is the outcome of waiting for LP's lmkf wrapper

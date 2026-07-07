@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
 )
 
 const statusBarHeight = 1

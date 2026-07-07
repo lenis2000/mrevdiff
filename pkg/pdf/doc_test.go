@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // fixturePath locates testdata/sample.pdf relative to the repo root.

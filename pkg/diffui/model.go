@@ -8,10 +8,10 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 // Filter selects which semantic diff pairs are visible in the outline.

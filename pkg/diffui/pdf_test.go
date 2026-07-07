@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"mrevdiff/pkg/diffreview"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/diffreview"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 func TestPrepareNewPDFUsesNewFilesystemEndpoint(t *testing.T) {

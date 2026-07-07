@@ -13,9 +13,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mrevdiff/pkg/diffui"
-	"mrevdiff/pkg/pdf"
-	"mrevdiff/pkg/ui"
+	"github.com/lenis2000/mrevdiff/pkg/diffui"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 // version is the mrevdiff release version. Overridable at build time via -ldflags.
