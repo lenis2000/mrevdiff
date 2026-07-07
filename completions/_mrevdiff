@@ -8,8 +8,32 @@
 #   rm -f ~/.zcompdump*; compinit
 
 _mrevdiff() {
-  _arguments \
+  local context state state_descr line
+  typeset -A opt_args
+
+  _arguments -C \
     '(- *)'{-V,--version}'[print version and exit]' \
+    '1: :->cmd_or_endpoint' \
+    '*:: :->args'
+
+  case $state in
+    cmd_or_endpoint)
+      _alternative \
+        'commands:subcommand:((fmt\:format\ a\ paper\ in\ place))' \
+        'files:tex file / endpoint:_files -g "*.tex"'
+      ;;
+    args)
+      if [[ $line[1] == fmt ]]; then
+        _mrevdiff_fmt
+      else
+        _mrevdiff_diff
+      fi
+      ;;
+  esac
+}
+
+_mrevdiff_diff() {
+  _arguments \
     '--base=[compare REV:path against working-tree path]:git revision:' \
     '--no-build[skip latexmk build for the new endpoint]' \
     '--draft[open TUI even when the new build fails]' \
@@ -29,6 +53,27 @@ _mrevdiff() {
     '--no-history[disable review history auto-save]' \
     '1:old endpoint or paper:_files -g "*.tex"' \
     '2:new endpoint:_files -g "*.tex"'
+}
+
+_mrevdiff_fmt() {
+  _arguments \
+    '(--print --check)--diff[show unified diff to stdout, do not write]' \
+    '(--diff --check -p --print)'{-p,--print}'[print formatted source to stdout, do not write]' \
+    '(--diff --print)--check[exit 1 if changes needed]' \
+    '--stdin[read source from stdin, write formatted to stdout]' \
+    '--fail-on-change[format in place and exit 1 when changed]' \
+    '--summary[scan only; print rewrite counts to stderr]' \
+    '--lines=[format only lines START:END (1-based, inclusive)]:range:' \
+    '*--rule=[restrict to these rule IDs]:rule id:' \
+    '*--skip-rule=[disable these rule IDs even when otherwise enabled]:rule id:' \
+    '--list-rules[print all registered rule IDs and exit]' \
+    '--allow-dirty[skip dirty-tree check before writing]' \
+    '--no-verify[skip PDF verification entirely (one-off)]' \
+    '--no-report[do not write paper.tex.fmt-report.md (one-off)]' \
+    '--clean-tempdir[remove verification tempdirs]' \
+    '--config=[path to config file]:config file:_files -g "*.toml"' \
+    '--noconfig[ignore config files; use built-in defaults]' \
+    '*:tex file:_files -g "*.tex"'
 }
 
 _mrevdiff "$@"

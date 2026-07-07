@@ -164,18 +164,6 @@ func TestApplyThemeEnv(t *testing.T) {
 		require.NotNil(t, cfg)
 		assert.Equal(t, "dark", cfg.Theme)
 	})
-	t.Run("falls back to MREVIEW_THEME", func(t *testing.T) {
-		t.Setenv("MREVDIFF_THEME", "")
-		t.Setenv("MREVIEW_THEME", "light")
-		cfg := ApplyThemeEnv(DefaultConfig())
-		assert.Equal(t, "light", cfg.Theme)
-	})
-	t.Run("MREVDIFF_THEME wins over MREVIEW_THEME", func(t *testing.T) {
-		t.Setenv("MREVDIFF_THEME", "dark")
-		t.Setenv("MREVIEW_THEME", "light")
-		cfg := ApplyThemeEnv(DefaultConfig())
-		assert.Equal(t, "dark", cfg.Theme)
-	})
 }
 
 func TestStylesForTheme(t *testing.T) {

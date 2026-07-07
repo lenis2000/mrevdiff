@@ -86,14 +86,9 @@ func compareStatus(err error) string {
 }
 
 func resolveCompareEditor() (string, []string, bool) {
-	// MREVDIFF_COMPARE_EDITOR is the tool's own name; MREVIEW_COMPARE_EDITOR
-	// is honoured as a fallback so an existing mreview shell setup keeps
-	// working unchanged.
-	for _, envVar := range []string{"MREVDIFF_COMPARE_EDITOR", "MREVIEW_COMPARE_EDITOR"} {
-		if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
-			if head, args, ok := resolveCompareEditorSpec(v); ok {
-				return head, args, true
-			}
+	if v := strings.TrimSpace(os.Getenv("MREVDIFF_COMPARE_EDITOR")); v != "" {
+		if head, args, ok := resolveCompareEditorSpec(v); ok {
+			return head, args, true
 		}
 	}
 	for _, candidate := range compareEditorCandidates {

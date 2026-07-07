@@ -57,6 +57,7 @@ const (
 	ActionHelp           Action = "help"
 	ActionQuit           Action = "quit"
 	ActionDiscard        Action = "discard"
+	ActionPalette        Action = "palette"
 )
 
 // actionMeta describes an action for --dump-keys and for validating
@@ -64,53 +65,71 @@ const (
 type actionMeta struct {
 	Action Action
 	Desc   string
+	// Palette is the human label shown in the ":" command palette. An empty
+	// label hides the action from the palette — pure vim motions, focus and
+	// resize nudges, and the search-step / quit / help / palette actions are
+	// all keyboard-only and carry no label.
+	Palette string
 }
 
 func actionCatalog() []actionMeta {
 	return []actionMeta{
-		{ActionNext, "move to next change pair (or source line when a source pane is focused)"},
-		{ActionPrev, "move to previous change pair / source line"},
-		{ActionJumpDown, "jump 10 pairs down"},
-		{ActionJumpUp, "jump 5 pairs up"},
-		{ActionFirst, "first pair"},
-		{ActionLast, "last pair"},
-		{ActionSectionNext, "next section"},
-		{ActionSectionPrev, "previous section"},
-		{ActionSourceLinePrev, "select previous source line (PDF anchor)"},
-		{ActionSourceLineNext, "select next source line (PDF anchor)"},
-		{ActionFocusPrev, "focus previous pane"},
-		{ActionFocusNext, "focus next pane"},
-		{ActionFilterCycle, "cycle the outline filter"},
-		{ActionRegimeToggle, "toggle semantic / coalesced diff regime"},
-		{ActionFoldToggle, "fold / unfold the current outline group"},
-		{ActionReviewToggle, "mark the current pair reviewed"},
-		{ActionAnnotate, "annotate the current pair"},
-		{ActionAnnotateEdit, "edit the current annotation"},
-		{ActionAnnotateDelete, "delete the current annotation"},
-		{ActionAnnotationList, "open the annotation list"},
-		{ActionCopy, "copy the selected change (side follows focus)"},
-		{ActionSearch, "search pairs (text, labels, IDs)"},
-		{ActionSearchNext, "next search match"},
-		{ActionSearchPrev, "previous search match"},
-		{ActionInfo, "review scope + description popup"},
-		{ActionEditInline, "inline single-line edit of the new file"},
-		{ActionEditExternal, "$EDITOR edit of the new file at the cursor line"},
-		{ActionUndo, "undo the last in-place edit"},
-		{ActionRedo, "redo the last undone edit"},
-		{ActionReload, "re-diff source and rebuild/reload the PDF"},
-		{ActionFullPage, "toggle full-page preview / region crop"},
-		{ActionBlink, "blink comparator: flip old / new PDF"},
-		{ActionSkim, "Skim forward-search at the cursor line"},
-		{ActionPreview, "open the new PDF in Preview"},
-		{ActionCompare, "open old vs new in the external compare editor"},
-		{ActionLayoutCycle, "cycle the pane layout"},
-		{ActionPDFZoom, "PDF-only zoom (toggle)"},
-		{ActionResizeShrink, "shrink the focused pane / source split"},
-		{ActionResizeGrow, "grow the focused pane / source split"},
-		{ActionHelp, "toggle the help overlay"},
-		{ActionQuit, "quit — save sidecar, emit annotations"},
-		{ActionDiscard, "discard annotations/marks and quit (press twice)"},
+		{ActionNext, "move to next change pair (or source line when a source pane is focused)", ""},
+		{ActionPrev, "move to previous change pair / source line", ""},
+		{ActionJumpDown, "jump 10 pairs down", ""},
+		{ActionJumpUp, "jump 5 pairs up", ""},
+		{ActionFirst, "first pair", ""},
+		{ActionLast, "last pair", ""},
+		{ActionSectionNext, "next section", ""},
+		{ActionSectionPrev, "previous section", ""},
+		{ActionSourceLinePrev, "select previous source line (PDF anchor)", ""},
+		{ActionSourceLineNext, "select next source line (PDF anchor)", ""},
+		{ActionFocusPrev, "focus previous pane", ""},
+		{ActionFocusNext, "focus next pane", ""},
+		{ActionFilterCycle, "cycle the outline filter", "Cycle outline filter"},
+		{ActionRegimeToggle, "toggle semantic / coalesced diff regime", "Toggle semantic / coalesced diff"},
+		{ActionFoldToggle, "fold / unfold the current outline group", "Fold / unfold outline group"},
+		{ActionReviewToggle, "mark the current pair reviewed", "Mark pair reviewed"},
+		{ActionAnnotate, "annotate the current pair", "Annotate current pair"},
+		{ActionAnnotateEdit, "edit the current annotation", "Edit current annotation"},
+		{ActionAnnotateDelete, "delete the current annotation", "Delete current annotation"},
+		{ActionAnnotationList, "open the annotation list", "Open annotation list"},
+		{ActionCopy, "copy the selected change (side follows focus)", "Copy selected change"},
+		{ActionSearch, "search pairs (text, labels, IDs)", "Search pairs (text, labels, IDs)"},
+		{ActionSearchNext, "next search match", ""},
+		{ActionSearchPrev, "previous search match", ""},
+		{ActionInfo, "review scope + description popup", "Show review scope / description"},
+		{ActionEditInline, "inline single-line edit of the new file", "Edit new file inline (current line)"},
+		{ActionEditExternal, "$EDITOR edit of the new file at the cursor line", "Edit new file in $EDITOR"},
+		{ActionUndo, "undo the last in-place edit", "Undo last in-place edit"},
+		{ActionRedo, "redo the last undone edit", "Redo last in-place edit"},
+		{ActionReload, "re-diff source and rebuild/reload the PDF", "Recompile / rebuild PDF"},
+		{ActionFullPage, "toggle full-page preview / region crop", "Toggle full-page PDF preview"},
+		{ActionBlink, "blink comparator: flip old / new PDF", "Blink comparator (old / new PDF)"},
+		{ActionSkim, "Skim forward-search at the cursor line", "Open in Skim at current line"},
+		{ActionPreview, "open the new PDF in Preview", "Open new PDF in Preview"},
+		{ActionCompare, "open old vs new in the external compare editor", "Compare old vs new (external)"},
+		{ActionLayoutCycle, "cycle the pane layout", "Cycle pane layout"},
+		{ActionPDFZoom, "PDF-only zoom (toggle)", "Toggle PDF-only zoom"},
+		{ActionResizeShrink, "shrink the focused pane / source split", ""},
+		{ActionResizeGrow, "grow the focused pane / source split", ""},
+		{ActionHelp, "toggle the help overlay", ""},
+		{ActionQuit, "quit — save sidecar, emit annotations", ""},
+		{ActionDiscard, "discard annotations/marks and quit (press twice)", ""},
+		{ActionPalette, "open the command palette", ""},
 	}
+}
+
+// paletteActions returns the catalog entries that carry a palette label, in
+// catalog order — the command set shown in the ":" palette.
+func paletteActions() []actionMeta {
+	var out []actionMeta
+	for _, m := range actionCatalog() {
+		if m.Palette != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // validActions is the set of remappable action names.
@@ -166,6 +185,7 @@ func defaultBindings() map[string]Action {
 		"|":  ActionPDFZoom,
 		"<":  ActionResizeShrink,
 		">":  ActionResizeGrow,
+		":":  ActionPalette,
 		"?":  ActionHelp,
 		"q":  ActionQuit,
 		"Q":  ActionDiscard,

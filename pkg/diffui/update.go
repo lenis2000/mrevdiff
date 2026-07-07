@@ -89,6 +89,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.confirmDelete(key == "y" || key == "Y"), nil
 	}
 	// Modal overlays claim the keyboard before global bindings.
+	if m.Palette != nil {
+		m.discardArmed = false
+		return m.updatePalette(msg)
+	}
 	if m.Search != nil && m.Search.Typing {
 		m.discardArmed = false
 		return m.updateSearchInput(msg)
@@ -176,7 +180,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingG = true
 		return m, nil
 	}
+	return m.runAction(action, count)
+}
 
+// runAction executes a resolved action with the given Vim repeat count. It is
+// the shared dispatch for keyboard bindings (via updateKey) and for the ":"
+// command palette, which always passes a count of 1.
+func (m Model) runAction(action Action, count int) (tea.Model, tea.Cmd) {
 	switch action {
 	case ActionFilterCycle:
 		m.Filter = CycleFilter(m.Filter)
@@ -245,6 +255,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ActionInfo:
 		m.ShowInfo = true
 		return m, nil
+	case ActionPalette:
+		return m.openPalette()
 	case ActionLayoutCycle:
 		m.cycleLayout()
 		m.PDFImage = ""

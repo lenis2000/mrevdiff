@@ -51,11 +51,6 @@ func TestKittyGraphicsAvailable(t *testing.T) {
 			env:  map[string]string{"MREVDIFF_FORCE_KITTY": "1"},
 			want: true,
 		},
-		{
-			name: "mreview compat force-enable still honoured",
-			env:  map[string]string{"MREVIEW_FORCE_KITTY": "1"},
-			want: true,
-		},
 	}
 	// Env vars we might touch — clear them all before each subtest so
 	// ambient shell state from the dev box doesn't bleed in.
@@ -64,7 +59,6 @@ func TestKittyGraphicsAvailable(t *testing.T) {
 		"GHOSTTY_RESOURCES_DIR",
 		"TMUX",
 		"MREVDIFF_FORCE_KITTY",
-		"MREVIEW_FORCE_KITTY",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

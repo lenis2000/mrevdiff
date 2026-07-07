@@ -210,8 +210,28 @@ make lint        # go vet
 ```
 
 The lint diagnostics surfaced in the outline (issue markers) are read
-from `<paper>.tex.fmt-report.md` files produced by `mreview fmt` — the
-two tools compose but neither requires the other.
+from `<paper>.tex.fmt-report.md` files produced by `mrevdiff fmt` (below).
+
+## Formatting: `mrevdiff fmt`
+
+mrevdiff also carries a LaTeX source formatter and linter — the
+format-then-review loop in one tool:
+
+```bash
+mrevdiff fmt paper.tex          # format in place, write paper.tex.fmt-report.md
+mrevdiff fmt --diff paper.tex   # show the unified diff, write nothing
+mrevdiff fmt --print paper.tex  # formatted source to stdout
+mrevdiff fmt --check paper.tex  # exit 1 if changes are needed (CI / pre-commit)
+mrevdiff fmt --lines 42:120 paper.tex   # format only a line range
+mrevdiff fmt --list-rules       # print every rule (tier, id, doc)
+```
+
+It applies safe whitespace/structure rules, optional PDF-fix rules, math
+alignment/wrapping, and emits Tier-3 lint diagnostics into the
+`.fmt-report.md` file that `mrevdiff` then surfaces as outline markers.
+Per-line/region opt-out lives in the source as `% mrevdiff-fmt: skip`
+(or `off` … `on`). Defaults come from the `[fmt]` table in the config;
+`mrevdiff fmt --help` lists the one-off flags.
 
 ## License
 

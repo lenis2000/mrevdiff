@@ -50,6 +50,8 @@ func (m Model) View() string {
 	// frame while an overlay is up (the repaint on close re-transmits it).
 	var overlay string
 	switch {
+	case m.Palette != nil:
+		overlay = m.renderPaletteOverlay(m.Width, bodyHeight)
 	case m.ShowHelp:
 		overlay = m.renderHelpOverlay(m.Width, bodyHeight)
 	case m.ShowInfo:
@@ -695,6 +697,7 @@ func (m Model) helpSections() []helpSection {
 			{pair(ActionResizeShrink, ActionResizeGrow), "resize focused pane / source split"},
 		}},
 		{"QUIT", [][2]string{
+			{k(ActionPalette), "command palette (all commands, fuzzy)"},
 			{k(ActionQuit), "quit — save sidecar, emit annotations"},
 			{k(ActionDiscard) + " " + k(ActionDiscard), "discard annotations/marks (file edits stay)"},
 			{k(ActionHelp), "close help · remap keys: mrevdiff --dump-keys"},

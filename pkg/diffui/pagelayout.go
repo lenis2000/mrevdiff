@@ -9,10 +9,9 @@ import (
 	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
-// pageLayoutCache memoizes per-page column detection (ported from
-// mreview's single-file UI — diff mode originally shipped without it,
-// which made every crop of a two-column paper span the full page width,
-// pulling in the neighboring column and its figures). The decision is
+// pageLayoutCache memoizes per-page column detection. Without it, every
+// crop of a two-column paper spans the full page width, pulling in the
+// neighboring column and its figures. The decision is
 // computed once per page (per PDF mtime) by taking the median width of
 // all SyncTeX-mapped block regions on that page; if the median spans
 // less than ~55% of the page, the page is treated as multi-column.

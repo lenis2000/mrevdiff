@@ -17,14 +17,13 @@ import "os"
 // requires the user to opt in via tmux config + the kitty allow-
 // passthrough setting, and without that the APC sequences render as
 // literal garbage. Users who *have* set up passthrough can force
-// rendering with MREVDIFF_FORCE_KITTY=1 (MREVIEW_FORCE_KITTY=1 is
-// honoured as a compatibility fallback).
+// rendering with MREVDIFF_FORCE_KITTY=1.
 //
 // Everything else (iTerm2, Terminal.app, alacritty, xterm, foot,
 // wezterm's non-kitty mode, etc.) gets a placeholder in the PDF
 // pane instead of raw APC escape garbage.
 func KittyGraphicsAvailable() bool {
-	if os.Getenv("MREVDIFF_FORCE_KITTY") == "1" || os.Getenv("MREVIEW_FORCE_KITTY") == "1" {
+	if os.Getenv("MREVDIFF_FORCE_KITTY") == "1" {
 		return true
 	}
 	if os.Getenv("TMUX") != "" {

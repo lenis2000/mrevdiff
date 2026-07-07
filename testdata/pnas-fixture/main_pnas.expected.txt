@@ -1,0 +1,214 @@
+SCHUBERT CALCULUS AND STOCHASTIC PROCESSES
+FIRST AUTHOR AND SECOND AUTHOR
+
+Abstract. We study the connection between Schubert calculus and certain
+stochastic processes on the symmetric group. Our main result establishes
+a bijection between reduced pipe dreams and a class of interacting particle
+systems. See Theorem 1.2 for precise statement. The methods rely on the
+Yang–Baxter equation; see Section 2.
+
+1. Introduction
+The study of Schubert polynomials, introduced by Lascoux and Schützenberger [1],
+has deep connections to algebraic combinatorics and representation theory. In this
+paper we explore a probabilistic interpretation of these polynomials.
+We simply define
+X
+Y
+Sw (x) =
+xi
+D∈RPD(w) (i,j)∈D
+
+as the generating function over reduced pipe dreams of w. This formula is well
+known and appears in many references.
+The key innovation of this work is the observation that the monomial expansion
+satisfies
+X
+(1)
+Sw (x) =
+Kw,α xα
+α
+
+where Kw,α are nonneg integer coefficients.
+We recall the definition of the Bruhat order.
+Definition 1.1. The Bruhat order on Sn is the partial order defined by u ≤ w if
+and only if some (equivalently, every) reduced word for w contains a subword that
+is a reduced word for u.
+Theorem 1.2. There exists a measure-preserving bijection between the set of reduced pipe dreams for w and the set of trajectories of the associated particle system,
+restricted to the time interval [0, 1].
+Proof. We construct the bijection explicitly. Given a reduced pipe dream D, define
+the trajectory map
+X
+(2)
+ϕD (t) =
+1[tij ,tij +ϵ] (t)
+(i,j)∈D
+
+(3)
+
+=
+
+Z t X
+
+δ(s − tij ) ds.
+
+0 (i,j)∈D
+
+The measure-preserving property follows from the Yang–Baxter equation (Lemma 2.1).
+Date: April 25, 2026.
+1
+
+2
+
+FIRST AUTHOR AND SECOND AUTHOR
+
+The injectivity is clear from the construction. For surjectivity, given a trajectory
+γ ∈ Tw , we reconstruct D by examining the jump times. At each jump time tij , we
+place a crossing tile at position (i, j) in the pipe dream. The resulting pipe dream
+is reduced because the trajectory satisfies
+(4)
+
+γ(t+ ) − γ(t− ) = sij
+
+for each jump, and the transpositions are all distinct.
+
+□
+
+2. Yang–Baxter equation
+We establish the key probabilistic identity.
+Lemma 2.1. Let Ri (x) denote the local Yang–Baxter operator acting on positions
+i and i + 1. Then for all x, y > 0,
+Ri (x)Ri+1 (x + y)Ri (y) = Ri+1 (y)Ri (x + y)Ri+1 (x).
+Proof. The proof is a direct matrix computation. We verify that both sides give
+the same 6 × 6 matrix when restricted to the three-particle state space {e1 , e2 , e3 }.
+Consider the left-hand side. We compute
+ x
+1 
+x+1
+Ri (x)Ri+1 (x + y)Ri (y) = x+1
+⊗I
+x
+1
+x+1
+x+1
+!
+·I ⊗
+
+x+y
+x+y+1
+x+y
+x+y+1
+
+ y
+·
+
+y+1
+y
+y+1
+
+1
+x+y+1
+1
+x+y+1
+
+1 
+y+1
+⊗ I.
+1
+y+1
+
+The right-hand side is computed analogously. Both sides agree, completing the
+proof.
+□
+3. Combinatorial identities
+In this section we derive several identities that follow from Theorem 1.2.
+Proposition 3.1. For any permutation w ∈ Sn ,
+X
+1 = r(w),
+D∈RPD(w)
+
+where r(w) is the number of reduced words for w.
+Proof. This follows from the bijection by specializing xi = 1 for all i in Theorem 1.2.
+□
+Corollary 3.2. For the longest element w0 ∈ Sn ,
+
+n
+2 !
+r(w0 ) = Qn−1 .
+i=1 i!
+Proof. We apply Proposition 3.1 to w = w0 and use the hook-length formula.
+
+□
+
+We note that the formula in Corollary 3.2 recovers a classical result of Stanley [2].
+The following conjecture remains open.
+Conjecture 3.3. For any two permutations u, w ∈ Sn with u ≤ w in Bruhat order,
+the difference Sw (x) − Su (x) has nonneg coefficients.
+
+SCHUBERT CALCULUS AND STOCHASTIC PROCESSES
+
+3
+
+4. Asymptotic analysis
+We study the behavior of the particle system as n → ∞. The following result
+gives the scaling limit.
+The particle density satisfies
+n
+1X
+(n)
+ρn (t, x) =
+δ(x − Xi (t))
+n i=1
+and converges weakly as n → ∞.
+The limit density satisfies the PDE
+∂
+∂ρ
++
+(ρv) = 0
+(5)
+∂t
+∂x
+∂
+log ρ(t, x) is the velocity field. This equation has appeared in
+where v(t, x) = − ∂x
+random matrix theory [3].
+Moreover, we can show that the free energy satisfies
+1
+Fn = − 2 log Zn
+(6)
+n
+ZZ
+Z
+(7)
+
+=
+
+log |x − y| dρ(x) dρ(y) +
+
+V (x) dρ(x).
+
+This leads to a variational characterization of the equilibrium measure.
+The density has compact support. Indeed, one can verify that
+√ √
+(8) supp(ρ) ⊆ [−2 t, 2 t]
+for all t > 0 with ∥ρ∥L1 = 1.
+Compare with (1) and 5.
+5. Numerical experiments
+We performed Monte Carlo simulations to verify the theoretical predictions.
+The simulations used 106 samples for each value of n. The results confirm the
+convergence to the predicted limit shape.
+For n = 100, the relative error was below 0.01.
+The simulations were implemented in Python using NumPy and SciPy. Code is
+available upon request.
+Theorem 5.1. For large n, the empirical measure µn converges weakly to the
+semicircle distribution.
+Remark. The convergence rate is O(n−1/2 ), which matches predictions from random
+matrix theory.
+References
+[1] A. Lascoux and M.-P. Schützenberger, Polynômes de Schubert, C. R. Acad. Sci. Paris 294
+(1982), 447–450.
+[2] R. P. Stanley, On the number of reduced decompositions of elements of Coxeter groups,
+European J. Combin. 5 (1984), 359–372.
+[3] G. Anderson, A. Guionnet, and O. Zeitouni, An Introduction to Random Matrices, Cambridge
+Univ. Press, 2010.
+
+

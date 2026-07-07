@@ -7,7 +7,7 @@ import (
 	"github.com/lenis2000/mrevdiff/pkg/parser"
 )
 
-// LoadExternalIssues loads a fmt-report.md file (produced by `mreview fmt`)
+// LoadExternalIssues loads a fmt-report.md file (produced by `mrevdiff fmt`)
 // and maps its diagnostics to owning blocks by line number. Returns nil
 // (not an error) when the report file does not exist.
 func LoadExternalIssues(reportPath string, doc *parser.Document) (map[string][]format.ReportDiag, error) {

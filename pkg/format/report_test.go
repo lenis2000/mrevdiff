@@ -83,7 +83,7 @@ func TestParseReport_EmptyContent(t *testing.T) {
 }
 
 func TestParseReport_OnlyHeader(t *testing.T) {
-	content := `# mreview fmt report — main.tex
+	content := `# mrevdiff fmt report — main.tex
 date: 2026-04-24T10:00:00Z
 tier: safe
 verify: skipped
@@ -93,6 +93,88 @@ verify: skipped
 	assert.Equal(t, "main.tex", rpt.File)
 	assert.Equal(t, "safe", rpt.Tier)
 	assert.Equal(t, "skipped", rpt.Verify)
+}
+
+func TestBuildReport_SafeOnly(t *testing.T) {
+	opts := Options{PDFFix: false}
+	result := PipelineResult{
+		Src: []byte("hello"),
+		Hits: []Hit{
+			{RuleID: "space.trailing", Line: 10, Excerpt: "trimmed"},
+			{RuleID: "space.trailing", Line: 20, Excerpt: "trimmed"},
+		},
+		Diags: []Diag{
+			{RuleID: "lint.todo-marker", Line: 5, Message: "TODO found"},
+		},
+	}
+	rpt := BuildReport("paper.tex", opts, result, nil)
+	assert.Equal(t, "paper.tex", rpt.File)
+	assert.Equal(t, "safe", rpt.Tier)
+	assert.Equal(t, "skipped", rpt.Verify)
+	require.Len(t, rpt.Rewrites, 1)
+	assert.Equal(t, "space.trailing", rpt.Rewrites[0].RuleID)
+	assert.Equal(t, 2, rpt.Rewrites[0].Count)
+	require.Len(t, rpt.Diags, 1)
+	assert.Equal(t, "lint.todo-marker", rpt.Diags[0].RuleID)
+}
+
+func TestBuildReport_WithVerifyResult(t *testing.T) {
+	opts := Options{PDFFix: true}
+	vr := &VerifyResult{
+		OK:       true,
+		Warnings: []string{"no-op warning"},
+	}
+	result := PipelineResult{
+		Src:  []byte("hello"),
+		Hits: []Hit{{RuleID: "math.paragraph-suppress", Line: 100, Excerpt: "collapsed"}},
+	}
+	rpt := BuildReport("paper.tex", opts, result, vr)
+	assert.Equal(t, "safe+pdf-fix", rpt.Tier)
+	assert.Equal(t, "text-layer (ok)", rpt.Verify)
+	assert.Equal(t, []string{"no-op warning"}, rpt.Warnings)
+}
+
+func TestBuildReport_VerifyFailed(t *testing.T) {
+	vr := &VerifyResult{OK: false}
+	rpt := BuildReport("paper.tex", Options{}, PipelineResult{}, vr)
+	assert.Equal(t, "text-layer (FAILED)", rpt.Verify)
+}
+
+func TestBuildReport_VerifyFailed_PreservesUnexpectedDiffs(t *testing.T) {
+	vr := &VerifyResult{
+		OK: false,
+		Unexpected: []Diff{
+			{Page: 10, LineInPage: 46, Before: "Eq. (0.2) and related questions.", After: "about Eq. (0.2) and related questions."},
+			{Page: 10, LineInPage: 55, Before: "implementations (C++ and Julia). After we found", After: "implementations (C++ and Julia). After we found the"},
+		},
+	}
+	rpt := BuildReport("paper.tex", Options{}, PipelineResult{}, vr)
+	assert.Equal(t, "text-layer (FAILED)", rpt.Verify)
+	assert.Len(t, rpt.VerifyDiffs, 2, "verifier diffs must be carried into the report")
+	assert.Equal(t, 10, rpt.VerifyDiffs[0].Page)
+	assert.Equal(t, 46, rpt.VerifyDiffs[0].LineInPage)
+}
+
+func TestWriteReport_EmitsVerificationFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.fmt-report.md")
+	rpt := Report{
+		File:   "p.tex",
+		Date:   time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC),
+		Tier:   "safe+pdf-fix",
+		Verify: "text-layer (FAILED)",
+		VerifyDiffs: []Diff{
+			{Page: 10, LineInPage: 46, Before: "Eq. (0.2) and related.", After: "about Eq. (0.2) and related."},
+		},
+	}
+	require.NoError(t, WriteReport(path, rpt))
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "## Verification failures (1 unexpected PDF text-layer diffs)")
+	assert.Contains(t, content, "page 10, line 46:")
+	assert.Contains(t, content, "before: Eq. (0.2) and related.")
+	assert.Contains(t, content, "after:  about Eq. (0.2) and related.")
 }
 
 func TestWriteReport_TruncatesLongLineList(t *testing.T) {

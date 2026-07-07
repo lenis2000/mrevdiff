@@ -1,9 +1,3 @@
-// Package format holds the read side of mreview's fmt-report machinery.
-// mrevdiff never runs the fmt rule engine; it only reads the
-// `<paper>.tex.fmt-report.md` files that `mreview fmt` writes, so lint
-// diagnostics surface as outline markers in the diff UI. The report
-// header regex below deliberately says "mreview" — that is the header
-// the producing tool writes.
 package format
 
 import (
@@ -11,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,13 +15,14 @@ import (
 
 // Report holds the structured content of a paper.tex.fmt-report.md file.
 type Report struct {
-	File     string         // base filename (e.g. "paper.tex")
-	Date     time.Time      // when the report was generated
-	Tier     string         // e.g. "safe", "safe+pdf-fix"
-	Verify   string         // e.g. "text-layer (ok)", "skipped", "text-layer (FAILED)"
-	Rewrites []RewriteGroup // per-rule hit summaries
-	Warnings []string       // verifier warnings
-	Diags    []ReportDiag   // Tier-3 diagnostics
+	File        string         // base filename (e.g. "paper.tex")
+	Date        time.Time      // when the report was generated
+	Tier        string         // e.g. "safe", "safe+pdf-fix"
+	Verify      string         // e.g. "text-layer (ok)", "skipped", "text-layer (FAILED)"
+	Rewrites    []RewriteGroup // per-rule hit summaries
+	Warnings    []string       // verifier warnings
+	Diags       []ReportDiag   // Tier-3 diagnostics
+	VerifyDiffs []Diff         // unexpected PDF text-layer diffs (only on verify failure)
 }
 
 // RewriteGroup summarises hits from a single rule.
@@ -45,12 +41,11 @@ type ReportDiag struct {
 
 // WriteReport writes a paper.tex.fmt-report.md file at reportPath.
 // The file is written atomically: a partial report cannot be observed by
-// the TUI's external-issues loader after a crash mid-write. Kept in
-// mrevdiff mainly for tests; production reports come from `mreview fmt`.
+// the TUI's external-issues loader after a crash mid-write.
 func WriteReport(reportPath string, rpt Report) error {
 	w := &bytes.Buffer{}
 
-	_, _ = fmt.Fprintf(w, "# mreview fmt report — %s\n", rpt.File)
+	_, _ = fmt.Fprintf(w, "# mrevdiff fmt report — %s\n", rpt.File)
 	_, _ = fmt.Fprintf(w, "date: %s\n", rpt.Date.UTC().Format(time.RFC3339))
 	_, _ = fmt.Fprintf(w, "tier: %s\n", rpt.Tier)
 	_, _ = fmt.Fprintf(w, "verify: %s\n", rpt.Verify)
@@ -82,6 +77,22 @@ func WriteReport(reportPath string, rpt Report) error {
 		}
 	}
 
+	// Verifier failures: persist the unexpected PDF text-layer diffs so the
+	// user can inspect them after the file has been rolled back.
+	if len(rpt.VerifyDiffs) > 0 {
+		_, _ = fmt.Fprintf(w, "\n## Verification failures (%d unexpected PDF text-layer diffs)\n", len(rpt.VerifyDiffs))
+		_, _ = fmt.Fprintln(w, "Note: many of these are line-position shifts caused by paragraph reflow — the words are present in the rendered PDF but at a different page-line.")
+		for _, d := range rpt.VerifyDiffs {
+			if d.Page == 0 && d.LineInPage == 0 {
+				_, _ = fmt.Fprintf(w, "- %s → %s\n", d.Before, d.After)
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "- page %d, line %d:\n", d.Page, d.LineInPage)
+			_, _ = fmt.Fprintf(w, "    before: %s\n", truncExcerpt(d.Before))
+			_, _ = fmt.Fprintf(w, "    after:  %s\n", truncExcerpt(d.After))
+		}
+	}
+
 	// Diagnostics section.
 	if len(rpt.Diags) > 0 {
 		_, _ = fmt.Fprintf(w, "\n## Diagnostics (Tier 3, %d issues)\n", len(rpt.Diags))
@@ -91,6 +102,67 @@ func WriteReport(reportPath string, rpt Report) error {
 	}
 
 	return persist.WriteFileAtomic(reportPath, w.Bytes())
+}
+
+// BuildReport constructs a Report from pipeline results and optional verifier output.
+func BuildReport(file string, opts Options, result PipelineResult, verifyResult *VerifyResult) Report {
+	rpt := Report{
+		File: file,
+		Date: time.Now(),
+	}
+
+	// Tier label.
+	if opts.PDFFix {
+		rpt.Tier = "safe+pdf-fix"
+	} else {
+		rpt.Tier = "safe"
+	}
+	if opts.Diag {
+		rpt.Tier += "+diag"
+	}
+
+	// Verify label.
+	if verifyResult != nil {
+		if verifyResult.OK {
+			rpt.Verify = "text-layer (ok)"
+		} else {
+			rpt.Verify = "text-layer (FAILED)"
+			rpt.VerifyDiffs = verifyResult.Unexpected
+		}
+		rpt.Warnings = verifyResult.Warnings
+	} else {
+		rpt.Verify = "skipped"
+	}
+
+	// Group hits by rule.
+	hitsByRule := map[string][]Hit{}
+	ruleOrder := []string{}
+	for _, h := range result.Hits {
+		if _, seen := hitsByRule[h.RuleID]; !seen {
+			ruleOrder = append(ruleOrder, h.RuleID)
+		}
+		hitsByRule[h.RuleID] = append(hitsByRule[h.RuleID], h)
+	}
+	for _, ruleID := range ruleOrder {
+		hits := hitsByRule[ruleID]
+		lines := make([]int, 0, len(hits))
+		for _, h := range hits {
+			lines = append(lines, h.Line)
+		}
+		sort.Ints(lines)
+		rpt.Rewrites = append(rpt.Rewrites, RewriteGroup{
+			RuleID: ruleID,
+			Count:  len(hits),
+			Lines:  lines,
+		})
+	}
+
+	// Diagnostics.
+	for _, d := range result.Diags {
+		rpt.Diags = append(rpt.Diags, ReportDiag(d))
+	}
+
+	return rpt
 }
 
 // LoadReport parses a paper.tex.fmt-report.md file into a Report.
@@ -107,9 +179,9 @@ func ParseReport(content string) (*Report, error) {
 	rpt := &Report{}
 	lines := strings.Split(content, "\n")
 
-	// Parse header. The literal "mreview" is the producing tool's name.
+	// Parse header.
 	if len(lines) > 0 {
-		if m := regexp.MustCompile(`^# mreview fmt report — (.+)$`).FindStringSubmatch(lines[0]); m != nil {
+		if m := regexp.MustCompile(`^# mrevdiff fmt report — (.+)$`).FindStringSubmatch(lines[0]); m != nil {
 			rpt.File = m[1]
 		}
 	}

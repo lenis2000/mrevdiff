@@ -36,9 +36,8 @@ type Options struct {
 	// TexPath is the path to the .tex file to compile. Required.
 	TexPath string
 	// BuildCmd, if non-empty, is run via "sh -c" inside Dir. The tex
-	// basename (no extension) is exposed as the env vars $MREVDIFF_BASENAME
-	// and $MREVIEW_BASENAME (the latter for compatibility with build
-	// scripts written for mreview) so custom commands can interpolate it.
+	// basename (no extension) is exposed as the env var $MREVDIFF_BASENAME
+	// so custom commands can interpolate it.
 	BuildCmd string
 	// Dir is the working directory for the command. Defaults to
 	// filepath.Dir(TexPath).
@@ -100,7 +99,7 @@ func RunWith(opts Options) (*Result, error) {
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdline)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "MREVDIFF_BASENAME="+base, "MREVIEW_BASENAME="+base)
+	cmd.Env = append(os.Environ(), "MREVDIFF_BASENAME="+base)
 
 	stdout := opts.Stdout
 	if stdout == nil {

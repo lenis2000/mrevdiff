@@ -289,11 +289,13 @@ type Model struct {
 	Pending  *PendingDelete
 
 	// Search is the / search state (nil = inactive); AnnList the @
-	// annotation-list overlay; ShowInfo the i scope popup. Description is
-	// the --description prose surfaced there.
+	// annotation-list overlay; ShowInfo the i scope popup; Palette the :
+	// command palette. Description is the --description prose surfaced in
+	// the info popup.
 	Search      *searchState
 	AnnList     *annListState
 	ShowInfo    bool
+	Palette     *paletteState
 	Description string
 	Keymap      *Keymap
 

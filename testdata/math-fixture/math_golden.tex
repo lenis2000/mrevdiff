@@ -1,0 +1,83 @@
+\documentclass{amsart}
+\usepackage{amsmath,amssymb}
+
+\begin{document}
+
+%% --- Section 1: math.align-columns targets ---
+
+% cases with misaligned & columns
+\begin{equation}
+f(x) =
+\begin{cases}
+x^2 & \text{if } x > 0, \\
+-x^3 + 1 & \text{if } x \le 0, \\
+0 & \text{otherwise}.
+\end{cases}
+\end{equation}
+
+% pmatrix with misaligned columns
+The matrix is
+\[
+A = \begin{pmatrix} 1 & 0 & 0 \\ 0 & \alpha & \beta \\ 0 & \gamma & \delta \end{pmatrix}.
+\]
+
+% tabular with misaligned columns
+\begin{tabular}{lll}
+Short & Medium text & Long column \\
+Longer entry & X & Y \\
+A & B & C
+\end{tabular}
+
+% align* with misaligned columns
+\begin{align*}
+f(x) &= ax^2 + bx + c \\
+g(x) &= \alpha x^3 + \beta x^2 \\
+h(x) &= 1
+\end{align*}
+
+%% --- Section 2: math.continuation-indent targets ---
+
+% equation with continuation lines starting with binops (not indented)
+\begin{equation*}
+S(n) = \sum_{k=1}^{n} k^2
++ \sum_{k=1}^{n} k
+- n(n+1)/2.
+\end{equation*}
+
+% gather with continuation
+\begin{gather*}
+F(x) = \int_0^x f(t)\, dt
++ C_1
+- C_2.
+\end{gather*}
+
+%% --- Section 3: prose.tilde-refs targets ---
+
+We refer to Theorem 1.1 in \cite{ref1} and also \ref{thm:main}.
+See equation \eqref{eq:first} for details.
+Compare with \cref{sec:intro}.
+
+%% --- Section 4: no-op environments (already aligned) ---
+
+\begin{align*}
+a &= b \\
+c &= d
+\end{align*}
+
+%% --- Section 5: refusal cases for align-columns ---
+
+% Unequal cell counts: should not align
+% mreview-fmt: skip
+\begin{align*}
+a &= b &= c \\
+d &= e
+\end{align*}
+
+% Comment in row: should not align
+% mreview-fmt: skip
+\begin{align*}
+a &= b \\ % this is a comment
+c &= d
+\end{align*}
+
+\end{document}

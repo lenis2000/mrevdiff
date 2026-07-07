@@ -22,7 +22,17 @@ import (
 var version = "0.1.0"
 
 func main() {
-	os.Exit(runDiff(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run dispatches subcommands. `mrevdiff fmt …` runs the LaTeX formatter;
+// everything else (including the bare `mrevdiff paper.tex` review form and
+// `--version`/`--help`) is the diff-review path.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "fmt" {
+		return runFmt(args[1:], stdout, stderr)
+	}
+	return runDiff(args, stdout, stderr)
 }
 
 // runTUI is overridable by tests to bypass tea.NewProgram (which requires a

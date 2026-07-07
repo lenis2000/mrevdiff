@@ -32,6 +32,32 @@ type Config struct {
 	// `mrevdiff --dump-keys` for the action catalog. (Colors remains
 	// parsed but unused.)
 	Keybinds map[string]string `toml:"keybinds"`
+
+	// `[fmt]` sub-table — controls `mrevdiff fmt` defaults.
+	Fmt FmtConfig `toml:"fmt"`
+}
+
+// FmtConfig holds `[fmt]` sub-table values. Pointer-to-bool distinguishes
+// "unset" from "set to false" so layered merges and flag-override work.
+type FmtConfig struct {
+	NoPDFFix      *bool             `toml:"no_pdf_fix"`
+	VerifyPDF     string            `toml:"verify_pdf"` // "" | "text" | "visual"
+	NoVerify      *bool             `toml:"no_verify"`
+	NoReport      *bool             `toml:"no_report"`
+	VerbatimEnvs  []string          `toml:"verbatim_envs"`
+	Indent        *bool             `toml:"indent"`      // default true
+	IndentChar    string            `toml:"indent_char"` // "" | "space" | "tab"
+	IndentSize    int               `toml:"indent_size"`
+	IndentRules   map[string]string `toml:"indent_rules"` // per-env indent override; "" = no indent, non-empty = literal indent unit
+	Wrap          string            `toml:"wrap"`         // "" | "off" | "column" | "sentence" | "sentence+column"
+	WrapCol       int               `toml:"wrap_col"`
+	TildeRefs     []string          `toml:"tilde_refs"`      // cite/ref commands for prose.tilde-refs; omit = defaults
+	MathAlign     *bool             `toml:"math_align"`      // default true; set false to disable math.align-columns
+	MathAlignEnvs []string          `toml:"math_align_envs"` // override default env list for math.align-columns
+	MathAlignSkip []string          `toml:"math_align_skip"` // envs to skip even if in the align list
+	MathWrap      *bool             `toml:"math_wrap"`       // default false (opt-in); set true to enable math.wrap-at-break-op
+	MathWrapCol   int               `toml:"math_wrap_col"`   // target column for math.wrap-at-break-op; 0 = 80
+	SkipRules     []string          `toml:"skip_rules"`      // disable these rule IDs even when otherwise enabled
 }
 
 // DefaultConfig returns an empty Config with non-nil maps so callers can
@@ -155,10 +181,82 @@ func mergeConfig(base, overlay *Config) {
 	for k, v := range overlay.Keybinds {
 		base.Keybinds[k] = v
 	}
+	mergeFmtConfig(&base.Fmt, &overlay.Fmt)
 }
 
-// ApplyThemeEnv returns cfg with its Theme replaced by MREVDIFF_THEME (or,
-// as a compatibility fallback, MREVIEW_THEME) when the env var is set to
+// mergeFmtConfig merges the [fmt] sub-table. Pointer-to-bool fields override
+// when set in the overlay; string/int fields override when non-empty/non-zero;
+// slice fields replace wholesale when the overlay slice is non-empty.
+func mergeFmtConfig(base, overlay *FmtConfig) {
+	if overlay.NoPDFFix != nil {
+		v := *overlay.NoPDFFix
+		base.NoPDFFix = &v
+	}
+	if overlay.NoVerify != nil {
+		v := *overlay.NoVerify
+		base.NoVerify = &v
+	}
+	if overlay.NoReport != nil {
+		v := *overlay.NoReport
+		base.NoReport = &v
+	}
+	if overlay.Indent != nil {
+		v := *overlay.Indent
+		base.Indent = &v
+	}
+	if overlay.VerifyPDF != "" {
+		base.VerifyPDF = overlay.VerifyPDF
+	}
+	if overlay.IndentChar != "" {
+		base.IndentChar = overlay.IndentChar
+	}
+	if overlay.Wrap != "" {
+		base.Wrap = overlay.Wrap
+	}
+	if overlay.IndentSize > 0 {
+		base.IndentSize = overlay.IndentSize
+	}
+	if overlay.WrapCol > 0 {
+		base.WrapCol = overlay.WrapCol
+	}
+	if len(overlay.VerbatimEnvs) > 0 {
+		base.VerbatimEnvs = append([]string(nil), overlay.VerbatimEnvs...)
+	}
+	if len(overlay.IndentRules) > 0 {
+		if base.IndentRules == nil {
+			base.IndentRules = map[string]string{}
+		}
+		for k, v := range overlay.IndentRules {
+			base.IndentRules[k] = v
+		}
+	}
+	if len(overlay.TildeRefs) > 0 {
+		base.TildeRefs = append([]string(nil), overlay.TildeRefs...)
+	}
+	if overlay.MathAlign != nil {
+		v := *overlay.MathAlign
+		base.MathAlign = &v
+	}
+	if len(overlay.MathAlignEnvs) > 0 {
+		base.MathAlignEnvs = append([]string(nil), overlay.MathAlignEnvs...)
+	}
+	if len(overlay.MathAlignSkip) > 0 {
+		base.MathAlignSkip = append([]string(nil), overlay.MathAlignSkip...)
+	}
+	if overlay.MathWrap != nil {
+		v := *overlay.MathWrap
+		base.MathWrap = &v
+	}
+	if overlay.MathWrapCol > 0 {
+		base.MathWrapCol = overlay.MathWrapCol
+	}
+	if len(overlay.SkipRules) > 0 {
+		base.SkipRules = append([]string(nil), overlay.SkipRules...)
+	}
+}
+
+// ApplyThemeEnv returns cfg with its Theme replaced by MREVDIFF_THEME when
+// the env var is set to
 // "dark" or "light". Other values are ignored so a stray setting does not
 // clobber a user-configured theme.
 func ApplyThemeEnv(cfg *Config) *Config {
@@ -166,9 +264,6 @@ func ApplyThemeEnv(cfg *Config) *Config {
 		cfg = DefaultConfig()
 	}
 	v := strings.ToLower(os.Getenv("MREVDIFF_THEME"))
-	if v != "dark" && v != "light" {
-		v = strings.ToLower(os.Getenv("MREVIEW_THEME"))
-	}
 	if v == "dark" || v == "light" {
 		cfg.Theme = v
 	}
