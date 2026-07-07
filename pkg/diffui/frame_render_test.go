@@ -58,7 +58,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			CellWidthPx: 9, CellHeightPx: 18,
 			Cache: cache, ReloadGen: 1,
 		}
-		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18)
+		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18, 0)
 		esc, id, _, status := renderDiffPDFFrame(in, key)
 		if status != "" || esc == "" || id == 0 {
 			t.Fatalf("render failed: esc=%dB id=%d status=%q", len(esc), id, status)
@@ -81,7 +81,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			CellWidthPx: 9, CellHeightPx: 18,
 			Cache: cache, ReloadGen: 1,
 		}
-		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18)
+		key := diffPDFRenderKey("n", block, 1, 40, 20, 9, 18, 0)
 		esc, id, _, status := renderDiffPDFFrame(in, key)
 		if status != "" || esc == "" || id == 0 {
 			t.Fatalf("render failed: esc=%dB id=%d status=%q", len(esc), id, status)
@@ -102,7 +102,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			CellWidthPx: 9, CellHeightPx: 18,
 			Cache: cache, ReloadGen: 1, FullPage: true,
 		}
-		key := diffPDFRenderKey("nf", block, 1, 40, 20, 9, 18)
+		key := diffPDFRenderKey("nf", block, 1, 40, 20, 9, 18, 0)
 		esc, id, _, status := renderDiffPDFFrame(in, key)
 		if status != "" || esc == "" || id == 0 {
 			t.Fatalf("full-page render failed: esc=%dB id=%d status=%q", len(esc), id, status)
@@ -113,7 +113,7 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 		cropIn := in
 		cropIn.Cache = cropCache
 		cropIn.FullPage = false
-		cropEsc, _, _, _ := renderDiffPDFFrame(cropIn, diffPDFRenderKey("n", block, 1, 40, 20, 9, 18))
+		cropEsc, _, _, _ := renderDiffPDFFrame(cropIn, diffPDFRenderKey("n", block, 1, 40, 20, 9, 18, 0))
 		if cropEsc == esc {
 			t.Fatalf("full-page frame must differ from the region crop")
 		}

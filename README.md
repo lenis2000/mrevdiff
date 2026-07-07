@@ -64,6 +64,7 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | `P` | open new PDF in Preview |
 | `C` | open old+new in external compare editor |
 | `F` | full-page preview (whole page, region marked) ↔ region crop; pairs with `\|` for a big view |
+| `←`/`→` (in `F`) | flip PDF pages when the PDF pane is focused (`↑`/`↓` too) |
 | `x` | blink comparator: flip the PDF pane between old and new builds (compiles the old side once, cached) |
 | `/`, `n/N` | search pairs (source text, labels, pair IDs; respects the filter) |
 | `@` | annotation list — enter jumps, `d` deletes |

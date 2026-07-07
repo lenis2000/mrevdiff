@@ -140,6 +140,19 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Full-page PDF: the arrows flip pages when the PDF pane is focused.
+	// This is a spatial mapping (like the count prefix), so it takes the
+	// raw arrow keys ahead of the remappable action dispatch; j/k/h/l keep
+	// their pair-nav and focus roles.
+	if m.pdfFullPage && m.Focus == PanePDF {
+		switch key {
+		case "left", "up":
+			return m.flipPDFPage(-1)
+		case "right", "down":
+			return m.flipPDFPage(1)
+		}
+	}
+
 	// The gg leader and digit count prefix are vim motion mechanics, not
 	// commands — handled literally, never remapped.
 	if m.pendingG {
@@ -200,11 +213,22 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleOldPDF()
 	case ActionFullPage:
 		m.pdfFullPage = !m.pdfFullPage
+		m.pdfPageView = 0
+		m.pdfPageViewAnchor = ""
 		m.PDFImage = ""
 		if m.pdfFullPage {
-			m.Status = "PDF: full page (toggle key crops to region)"
+			// Focus the PDF pane (when visible) so the arrows flip pages
+			// right away.
+			for _, p := range m.focusOrder() {
+				if p == PanePDF {
+					m.Focus = PanePDF
+					break
+				}
+			}
 			if m.Layout == LayoutNoPDF {
-				m.Status += " — press \\ or | to show the PDF pane"
+				m.Status = "PDF: full page — press \\ or | to show the PDF pane"
+			} else {
+				m.Status = "PDF: full page — arrows flip pages (toggle key crops to region)"
 			}
 		} else {
 			m.Status = "PDF: region crop"

@@ -3,6 +3,7 @@ package diffui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -83,6 +84,10 @@ type diffPDFRenderInputs struct {
 	SideKey string
 	// FullPage renders the whole page (region marked) instead of a crop.
 	FullPage bool
+	// PageOverride, in full-page mode, is the 1-based page to render
+	// regardless of which page the current pair's region is on (the arrows
+	// flip through pages). 0 means "the current pair's page".
+	PageOverride int
 }
 
 // PrepareNewPDF builds or opens the new endpoint's existing PDF artifacts.
@@ -349,13 +354,8 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
-	if m.pdfFullPage {
-		// Full-page frames share the block key but must not collide with
-		// the region crop of the same block.
-		sideKey += "f"
-	}
-	// Resolve the page for the pane title (cheap map lookup; the frame
-	// render resolves it again but this keeps the view pure).
+	// Resolve the current pair's page (cheap map lookup; the frame render
+	// resolves it again but this keeps the view pure).
 	m.pdfPageShown = 0
 	if block.StartLine >= 1 {
 		file := block.File
@@ -364,6 +364,34 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		}
 		if r := regionForBlockLines(idx, file, block.StartLine, block.EndLine); r != nil {
 			m.pdfPageShown = r.Page
+		}
+	}
+	pageOverride := 0
+	if m.pdfFullPage {
+		// Full-page frames share the block key but must not collide with
+		// the region crop of the same block.
+		sideKey += "f"
+		// A cursor move to a different pair drops the flipped view so the
+		// full page follows the cursor again.
+		if pair.ID != m.pdfPageViewAnchor {
+			m.pdfPageView = 0
+			m.pdfPageViewAnchor = ""
+		}
+		targetPage := m.pdfPageShown
+		if m.pdfPageView > 0 {
+			targetPage = m.pdfPageView
+		}
+		if n := pdfDoc.NumPage(); n > 0 {
+			if targetPage < 1 {
+				targetPage = 1
+			}
+			if targetPage > n {
+				targetPage = n
+			}
+		}
+		if targetPage > 0 {
+			pageOverride = targetPage
+			m.pdfPageShown = targetPage
 		}
 	}
 	cellW, cellH := pdf.DetectCellPixelSize()
@@ -383,9 +411,15 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		ReloadGen:    m.pdfReloadGen,
 		SideKey:      sideKey,
 		FullPage:     m.pdfFullPage,
+		PageOverride: pageOverride,
 	}
-	key := diffPDFRenderKey(sideKey, block, m.pdfReloadGen, w, h, cellW, cellH)
-	neighbors := m.neighborBlocks(pair.ID, sideKey == "o")
+	key := diffPDFRenderKey(sideKey, block, m.pdfReloadGen, w, h, cellW, cellH, pageOverride)
+	// Neighbor prefetch warms adjacent pairs' region crops; in full-page
+	// mode the arrows browse pages instead, so skip it there.
+	var neighbors []*parser.Block
+	if !m.pdfFullPage {
+		neighbors = m.neighborBlocks(pair.ID, sideKey == "o")
+	}
 	// Register the in-flight render synchronously (Update goroutine) so a
 	// quit that races the tick still waits for it in WaitPDFRenders.
 	m.escCache.renderStarted()
@@ -398,6 +432,62 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		}
 		return diffPDFRenderMsg{Generation: gen, Image: image, ImageID: imageID, XferPath: xferPath, Status: status}
 	})
+}
+
+// activePDFDoc returns the PDF document backing the pane's current side
+// (old for the blink comparator, else new).
+func (m Model) activePDFDoc() *pdf.Doc {
+	if m.pdfSide == pdfSideOld && m.OldPDF != nil {
+		return m.OldPDF
+	}
+	return m.PDF
+}
+
+// stepPage advances a 1-based page index by delta, clamped to [1, total]
+// (total<=0 leaves the upper bound open).
+func stepPage(cur, delta, total int) int {
+	if cur < 1 {
+		cur = 1
+	}
+	cur += delta
+	if cur < 1 {
+		cur = 1
+	}
+	if total > 0 && cur > total {
+		cur = total
+	}
+	return cur
+}
+
+// flipPDFPage moves the full-page view by delta pages — the arrow keys in
+// full-page mode. The view is anchored to the current pair, so a later
+// cursor move re-syncs the page to follow the cursor.
+func (m Model) flipPDFPage(delta int) (tea.Model, tea.Cmd) {
+	if !m.pdfFullPage {
+		return m, nil
+	}
+	doc := m.activePDFDoc()
+	if doc == nil {
+		m.Status = "no PDF loaded"
+		return m, nil
+	}
+	n := doc.NumPage()
+	if n < 1 {
+		m.Status = "no PDF pages"
+		return m, nil
+	}
+	cur := m.pdfPageView
+	if cur < 1 {
+		cur = m.pdfPageShown
+	}
+	cur = stepPage(cur, delta, n)
+	m.pdfPageView = cur
+	if pair := m.CurrentPair(); pair != nil {
+		m.pdfPageViewAnchor = pair.ID
+	}
+	m.PDFImage = ""
+	m.Status = fmt.Sprintf("PDF page %d/%d", cur, n)
+	return m.withPDFRender()
 }
 
 // WaitPDFRenders blocks until in-flight PDF render/prefetch goroutines

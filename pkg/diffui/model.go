@@ -245,6 +245,12 @@ type Model struct {
 	// pane title. Independent of the layout/zoom keys.
 	pdfFullPage  bool
 	pdfPageShown int
+	// pdfPageView is the page the arrows flipped to in full-page mode
+	// (0 = follow the current pair's page). pdfPageViewAnchor is the pair
+	// that flip was anchored to; moving the cursor to a different pair
+	// drops the flip so the view follows the cursor again.
+	pdfPageView       int
+	pdfPageViewAnchor string
 
 	// agtermFlagged tracks the last flag state pushed to agterm so the
 	// reconciler only shells out on transitions; buildFailed records

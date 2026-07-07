@@ -58,6 +58,10 @@ func shellQuoteArg(s string) string {
 // image id, so a changed subscript or shifted equation pops out the way a
 // blink comparator makes a moving star pop out.
 func (m Model) toggleOldPDF() (tea.Model, tea.Cmd) {
+	// Flipping sides re-syncs the full-page view to the pair's page on the
+	// side now shown (page counts can differ between old and new builds).
+	m.pdfPageView = 0
+	m.pdfPageViewAnchor = ""
 	if m.pdfSide == pdfSideOld {
 		m.pdfSide = pdfSideNew
 		m.Status = "PDF: new side"

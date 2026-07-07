@@ -255,8 +255,14 @@ func (m Model) renderPDFPane(width, height int, focusedOpt ...bool) string {
 		title = "PDF · OLD (" + m.Review.Old.Label + ") — x flips"
 	}
 	if m.pdfFullPage {
+		total := ""
+		if doc := m.activePDFDoc(); doc != nil {
+			if n := doc.NumPage(); n > 0 {
+				total = fmt.Sprintf("/%d", n)
+			}
+		}
 		if m.pdfPageShown > 0 {
-			title += fmt.Sprintf(" · full page %d", m.pdfPageShown)
+			title += fmt.Sprintf(" · full page %d%s (←→ flips)", m.pdfPageShown, total)
 		} else {
 			title += " · full page"
 		}
@@ -676,7 +682,7 @@ func (m Model) helpSections() []helpSection {
 			{pair(ActionUndo, ActionRedo), "undo / redo in-place edits"},
 		}},
 		{"PDF", [][2]string{
-			{k(ActionFullPage), "full-page preview (region marked) ↔ region crop"},
+			{k(ActionFullPage), "full-page preview ↔ region crop (then arrows flip pages)"},
 			{k(ActionBlink), "blink comparator: flip old/new PDF (builds old once)"},
 			{k(ActionSkim), "Skim forward-search at line (never compiles)"},
 			{k(ActionPreview), "open new PDF in Preview"},

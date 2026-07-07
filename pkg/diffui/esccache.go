@@ -10,6 +10,7 @@ import (
 
 	"github.com/lenis2000/mrevdiff/pkg/parser"
 	"github.com/lenis2000/mrevdiff/pkg/pdf"
+	"github.com/lenis2000/mrevdiff/pkg/synctex"
 )
 
 // pdfEscCacheMax bounds the rendered-frame cache by entry count, and
@@ -267,13 +268,18 @@ func (c *pdfEscCache) clear() {
 // diffPDFRenderKey builds the cache key for one frame. The side prefix
 // separates old/new frames of the same block; the reload generation
 // invalidates everything when the PDF is rebuilt; geometry and cell pixel
-// size cover pane resizes and monitor/font changes.
-func diffPDFRenderKey(side string, block *parser.Block, reloadGen, wCells, hCells int, cellW, cellH float64) string {
+// size cover pane resizes and monitor/font changes; page (>0, full-page
+// mode only) separates flipped pages of the same block.
+func diffPDFRenderKey(side string, block *parser.Block, reloadGen, wCells, hCells int, cellW, cellH float64, page int) string {
 	id := ""
 	if block != nil {
 		id = block.ID
 	}
-	return fmt.Sprintf("%s|%s|g%d|%dx%d|%.2fx%.2f", side, id, reloadGen, wCells, hCells, cellW, cellH)
+	key := fmt.Sprintf("%s|%s|g%d|%dx%d|%.2fx%.2f", side, id, reloadGen, wCells, hCells, cellW, cellH)
+	if page > 0 {
+		key += fmt.Sprintf("|pg%d", page)
+	}
+	return key
 }
 
 // renderDiffPDFFrame renders (or fetches from cache) the frame for
@@ -297,23 +303,36 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		file = in.Doc.File
 	}
 	region := regionForBlockLines(in.Index, file, in.Block.StartLine, in.Block.EndLine)
-	if region == nil {
-		return "", 0, "", pdf.NoRegionPlaceholder
-	}
 	epoch := in.Cache.currentEpoch()
 	paneWPx := int(float64(in.WidthCells) * in.CellWidthPx)
 	paneHPx := int(float64(in.HeightCells) * in.CellHeightPx)
 	var png []byte
 	var err error
 	if in.FullPage {
-		// Whole page with the region marked — floats, margins, and page
-		// context visible.
-		png, err = pdf.RenderPageFitted(in.PDF, region.Page, *region, pdf.FitOptions{
+		// Whole page with the region marked (when the region is on this
+		// page) — floats, margins, and page context visible. PageOverride
+		// lets the arrows flip to any page, including pages the current
+		// pair's region is not on (then the page renders unmarked).
+		page := in.PageOverride
+		var mark synctex.Region
+		if region != nil {
+			mark = *region
+			if page <= 0 {
+				page = region.Page
+			}
+		}
+		if page < 1 {
+			return "", 0, "", pdf.NoRegionPlaceholder
+		}
+		png, err = pdf.RenderPageFitted(in.PDF, page, mark, pdf.FitOptions{
 			PaneWidthPx:  paneWPx,
 			PaneHeightPx: paneHPx,
 			MarkRegion:   true,
 		})
 	} else {
+		if region == nil {
+			return "", 0, "", pdf.NoRegionPlaceholder
+		}
 		// Column-aware cropping: on a two-column page a full-width crop
 		// drags in the neighboring column and its figures; slice to the
 		// region's column instead. Page-level detection avoids misfiring on
@@ -352,7 +371,7 @@ func warmNeighborFrames(in diffPDFRenderInputs, neighbors []*parser.Block) {
 		}
 		nin := in
 		nin.Block = b
-		key := diffPDFRenderKey(in.SideKey, b, in.ReloadGen, in.WidthCells, in.HeightCells, in.CellWidthPx, in.CellHeightPx)
+		key := diffPDFRenderKey(in.SideKey, b, in.ReloadGen, in.WidthCells, in.HeightCells, in.CellWidthPx, in.CellHeightPx, 0)
 		if !nin.Cache.tryClaim(key) {
 			continue
 		}
