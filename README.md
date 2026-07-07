@@ -56,6 +56,7 @@ snapshotted to `~/.config/mrevdiff/history/<project>/` as a safety net
 | `S` | Skim forward-search at current line (never compiles) |
 | `P` | open new PDF in Preview |
 | `C` | open old+new in external compare editor |
+| `F` | full-page preview (whole page, region marked) ↔ region crop; pairs with `\|` for a big view |
 | `x` | blink comparator: flip the PDF pane between old and new builds (compiles the old side once, cached) |
 | `/`, `n/N` | search pairs (source text, labels, pair IDs; respects the filter) |
 | `@` | annotation list — enter jumps, `d` deletes |
@@ -103,6 +104,11 @@ The PDF pane ports the fast-rendering work from
 - **Region marker** — an amber outline inside every crop marks the exact
   SyncTeX region of the cursor block, so the eye lands on the changed
   lines instead of hunting through the context.
+- **Full-page preview (`F`)** — a pure render-mode toggle (independent of
+  the `\`/`|` layout keys) that swaps the region crop for the whole page
+  with the current region still marked, so float placement, margins, and
+  page context are visible. Follows the cursor's page as you navigate;
+  combine with `|` for a full-page zoom.
 - **Blink comparator (`x`)** — the old endpoint compiles once into a
   content-addressed cache (`.mrevdiff/oldpdf-<hash>/`, reused across
   sessions) and `x` flips the pane between old and new renders at

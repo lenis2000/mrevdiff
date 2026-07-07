@@ -238,6 +238,11 @@ type Model struct {
 	pdfSide     int
 	oldPDFState int
 	oldPDFGen   int
+	// pdfFullPage renders the whole page (region marked) instead of the
+	// region crop; pdfPageShown is the 1-based page last rendered, for the
+	// pane title. Independent of the layout/zoom keys.
+	pdfFullPage  bool
+	pdfPageShown int
 
 	// agtermFlagged tracks the last flag state pushed to agterm so the
 	// reconciler only shells out on transitions; buildFailed records

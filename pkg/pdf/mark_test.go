@@ -2,6 +2,7 @@ package pdf
 
 import (
 	"bytes"
+	"image/png"
 	"path/filepath"
 	"testing"
 
@@ -50,5 +51,60 @@ func TestCropFittedMarkRegion(t *testing.T) {
 	}
 	if !bytes.Equal(plain1, plain2) {
 		t.Fatalf("marker leaked into the cached page pixmap — unmarked crops differ after a marked render")
+	}
+}
+
+// TestRenderPageFitted pins the full-page path: it renders a valid PNG,
+// the marker changes the output, and marking never mutates the cached
+// page pixmap.
+func TestRenderPageFitted(t *testing.T) {
+	doc, region := openSamplePDF(t)
+	opts := FitOptions{PaneWidthPx: 600, PaneHeightPx: 800}
+
+	unmarked, err := RenderPageFitted(doc, region.Page, region, opts)
+	if err != nil {
+		t.Fatalf("unmarked full page: %v", err)
+	}
+	if _, decErr := png.Decode(bytes.NewReader(unmarked)); decErr != nil {
+		t.Fatalf("full-page output is not a valid PNG: %v", decErr)
+	}
+
+	markedOpts := opts
+	markedOpts.MarkRegion = true
+	marked, err := RenderPageFitted(doc, region.Page, region, markedOpts)
+	if err != nil {
+		t.Fatalf("marked full page: %v", err)
+	}
+	if bytes.Equal(unmarked, marked) {
+		t.Fatalf("marking the region must change the full-page render")
+	}
+
+	// A full page is wider/taller than a region crop of the same page, so
+	// the two render paths must differ.
+	crop, err := CropFitted(doc, region, FitOptions{PaneWidthPx: 600, PaneHeightPx: 800, MarkRegion: true})
+	if err != nil {
+		t.Fatalf("region crop: %v", err)
+	}
+	if bytes.Equal(crop, marked) {
+		t.Fatalf("full-page render must differ from the region crop")
+	}
+
+	// Marking must not have scribbled the cached page pixmap.
+	unmarked2, err := RenderPageFitted(doc, region.Page, region, opts)
+	if err != nil {
+		t.Fatalf("unmarked full page 2: %v", err)
+	}
+	if !bytes.Equal(unmarked, unmarked2) {
+		t.Fatalf("full-page marker leaked into the cached page pixmap")
+	}
+}
+
+func TestRenderPageFittedRejectsBadInput(t *testing.T) {
+	doc, region := openSamplePDF(t)
+	if _, err := RenderPageFitted(nil, 1, region, FitOptions{}); err == nil {
+		t.Fatalf("nil doc must error")
+	}
+	if _, err := RenderPageFitted(doc, 0, region, FitOptions{}); err == nil {
+		t.Fatalf("non-positive page must error")
 	}
 }

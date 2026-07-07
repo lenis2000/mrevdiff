@@ -93,6 +93,56 @@ func TestRenderDiffPDFFrameEndToEnd(t *testing.T) {
 			t.Fatalf("transfer PNG must exist while cached: %v", err)
 		}
 	})
+
+	t.Run("full page", func(t *testing.T) {
+		cache := newPDFEscCache("")
+		in := diffPDFRenderInputs{
+			Block: block, PDF: doc, Index: idx,
+			WidthCells: 40, HeightCells: 20,
+			CellWidthPx: 9, CellHeightPx: 18,
+			Cache: cache, ReloadGen: 1, FullPage: true,
+		}
+		key := diffPDFRenderKey("nf", block, 1, 40, 20, 9, 18)
+		esc, id, _, status := renderDiffPDFFrame(in, key)
+		if status != "" || esc == "" || id == 0 {
+			t.Fatalf("full-page render failed: esc=%dB id=%d status=%q", len(esc), id, status)
+		}
+		// A crop of the same block under the same key namespace must produce
+		// a different frame, confirming full-page took a distinct path.
+		cropCache := newPDFEscCache("")
+		cropIn := in
+		cropIn.Cache = cropCache
+		cropIn.FullPage = false
+		cropEsc, _, _, _ := renderDiffPDFFrame(cropIn, diffPDFRenderKey("n", block, 1, 40, 20, 9, 18))
+		if cropEsc == esc {
+			t.Fatalf("full-page frame must differ from the region crop")
+		}
+	})
+}
+
+// TestFullPageToggle pins the F key: it flips the render mode and the
+// pane title reflects it.
+func TestFullPageToggle(t *testing.T) {
+	m := New(fixtureReview(), Options{})
+	m.Width, m.Height = 120, 40
+	m.Layout = LayoutThreeCol
+	if m.pdfFullPage {
+		t.Fatalf("full-page must default off")
+	}
+	m = pressKey(t, m, "F")
+	if !m.pdfFullPage {
+		t.Fatalf("F should turn full-page on")
+	}
+	if !strings.Contains(m.Status, "full page") {
+		t.Fatalf("status should announce full page, got %q", m.Status)
+	}
+	m = pressKey(t, m, "F")
+	if m.pdfFullPage {
+		t.Fatalf("F should toggle full-page back off")
+	}
+	if !strings.Contains(m.Status, "region crop") {
+		t.Fatalf("status should announce region crop, got %q", m.Status)
+	}
 }
 
 // TestApplyPDFRenderSwapsImagesByID pins the draw-new-then-delete-old

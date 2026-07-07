@@ -78,8 +78,11 @@ type diffPDFRenderInputs struct {
 	ReloadGen    int
 	// SideKey namespaces frame-cache keys per PDF side ("n" new, "o" old):
 	// an unchanged block has the same ID in both documents but renders
-	// from different PDFs.
+	// from different PDFs. Full-page frames add an "f" so they never
+	// collide with region crops of the same block.
 	SideKey string
+	// FullPage renders the whole page (region marked) instead of a crop.
+	FullPage bool
 }
 
 // PrepareNewPDF builds or opens the new endpoint's existing PDF artifacts.
@@ -346,6 +349,23 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
+	if m.pdfFullPage {
+		// Full-page frames share the block key but must not collide with
+		// the region crop of the same block.
+		sideKey += "f"
+	}
+	// Resolve the page for the pane title (cheap map lookup; the frame
+	// render resolves it again but this keeps the view pure).
+	m.pdfPageShown = 0
+	if block.StartLine >= 1 {
+		file := block.File
+		if file == "" && doc != nil {
+			file = doc.File
+		}
+		if r := regionForBlockLines(idx, file, block.StartLine, block.EndLine); r != nil {
+			m.pdfPageShown = r.Page
+		}
+	}
 	cellW, cellH := pdf.DetectCellPixelSize()
 	m.pdfGen++
 	gen := m.pdfGen
@@ -362,6 +382,7 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		PageLayout:   m.pageLayout,
 		ReloadGen:    m.pdfReloadGen,
 		SideKey:      sideKey,
+		FullPage:     m.pdfFullPage,
 	}
 	key := diffPDFRenderKey(sideKey, block, m.pdfReloadGen, w, h, cellW, cellH)
 	neighbors := m.neighborBlocks(pair.ID, sideKey == "o")

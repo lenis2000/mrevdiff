@@ -254,6 +254,13 @@ func (m Model) renderPDFPane(width, height int, focusedOpt ...bool) string {
 	if m.pdfSide == pdfSideOld {
 		title = "PDF · OLD (" + m.Review.Old.Label + ") — x flips"
 	}
+	if m.pdfFullPage {
+		if m.pdfPageShown > 0 {
+			title += fmt.Sprintf(" · full page %d", m.pdfPageShown)
+		} else {
+			title += " · full page"
+		}
+	}
 	content := title
 	if body := m.pdfPaneBody(); body != "" {
 		content += "\n" + body
@@ -656,6 +663,7 @@ func helpSections(allowModifications bool) []helpSection {
 			{"u / ctrl+r", "undo / redo in-place edits"},
 		}},
 		{"PDF", [][2]string{
+			{"F", "full-page preview (region marked) ↔ region crop"},
 			{"x", "blink comparator: flip old/new PDF (builds old once)"},
 			{"S", "Skim forward-search at line (never compiles)"},
 			{"P", "open new PDF in Preview"},

@@ -297,6 +297,64 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// RenderPageFitted renders the whole page at the DPI that fits it into the
+// pane and (when MarkRegion) draws the marker around r. Unlike CropFitted
+// it never slices — floats, margins, figure placement, and page context
+// are all visible — so it backs the full-page preview toggle. r only
+// positions the marker; a zero-extent or off-page r renders the page
+// unmarked.
+func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) ([]byte, error) {
+	if d == nil {
+		return nil, fmt.Errorf("pdf: nil doc")
+	}
+	if page < 1 {
+		return nil, fmt.Errorf("pdf: page must be positive (got %d)", page)
+	}
+	bounds, err := d.Bounds(page - 1)
+	if err != nil {
+		return nil, err
+	}
+	pageWPt := float64(bounds.Dx())
+	pageHPt := float64(bounds.Dy())
+	if pageWPt < 1 || pageHPt < 1 {
+		return nil, fmt.Errorf("pdf: page %d has zero bounds", page)
+	}
+
+	dpi := DefaultCropDPI
+	if opts.PaneWidthPx > 0 && opts.PaneHeightPx > 0 {
+		dpi = SuggestDPI(pageWPt, pageHPt, opts.PaneWidthPx, opts.PaneHeightPx)
+	}
+	if ss := SuperSampleFactor(); ss > 1 {
+		dpi *= ss
+		if dpi > fitMaxDPISupersampled {
+			dpi = fitMaxDPISupersampled
+		}
+	}
+
+	img, err := d.Page(page-1, dpi)
+	if err != nil {
+		return nil, err
+	}
+	scale := dpi / 72.0
+
+	var out image.Image = img
+	if opts.MarkRegion && HasExtent(r) && r.Page == page {
+		b := img.Bounds()
+		regionRect := image.Rect(
+			b.Min.X+int(r.X*scale),
+			b.Min.Y+int(r.Y*scale),
+			b.Min.X+int((r.X+r.W)*scale),
+			b.Min.Y+int((r.Y+r.H)*scale),
+		)
+		out = markRegion(img, regionRect, scale)
+	}
+	var buf bytes.Buffer
+	if err := fastPNG.Encode(&buf, out); err != nil {
+		return nil, fmt.Errorf("pdf: encode png: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 // markRegionColor is the marker ink: amber, readable on both the white
 // page and dark figures without masking the text underneath.
 var markRegionColor = color.RGBA{R: 255, G: 165, B: 0, A: 255}

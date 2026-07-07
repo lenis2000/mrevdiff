@@ -183,6 +183,18 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openSkimAtLine()
 	case "x":
 		return m.toggleOldPDF()
+	case "F":
+		m.pdfFullPage = !m.pdfFullPage
+		m.PDFImage = ""
+		if m.pdfFullPage {
+			m.Status = "PDF: full page (F crops to region)"
+			if m.Layout == LayoutNoPDF {
+				m.Status += " — press \\ or | to show the PDF pane"
+			}
+		} else {
+			m.Status = "PDF: region crop"
+		}
+		return m.withPDFRender()
 	case "/":
 		return m.startSearch()
 	case "n":
