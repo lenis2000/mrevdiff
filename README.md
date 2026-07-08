@@ -1,10 +1,10 @@
 # mrevdiff
 
-Semantic diff review TUI for LaTeX papers — peeled out of
-[mreview](https://github.com/lenis2000/mreview)'s diff mode into a
-standalone tool with behavior akin to
-[revdiff](https://github.com/umputun/revdiff), plus edit-in-place and
-PDF build awareness.
+Semantic diff review TUI for LaTeX papers, with edit-in-place and PDF
+build awareness. Inspired by
+[Umputun](https://github.com/umputun)'s
+[revdiff](https://github.com/umputun/revdiff), whose annotate-and-review
+UX it follows.
 
 Instead of diffing lines, mrevdiff parses both versions of a paper into
 LaTeX blocks (sections, theorems, proofs, displays, figures, paragraphs)
@@ -176,10 +176,7 @@ The help overlay (`?`) always shows your live bindings.
 Environment: `MREVDIFF_THEME`, `MREVDIFF_FORCE_KITTY`,
 `MREVDIFF_COMPARE_EDITOR` (for `C`; falls back to `opendiff`, `zed`),
 `$EDITOR` (for `E`), `MREVDIFF_EXIT_CODE_ON_ANNOTATIONS`,
-`MREVDIFF_HISTORY_DIR`. For `MREVDIFF_THEME`, `MREVDIFF_FORCE_KITTY`, and
-`MREVDIFF_COMPARE_EDITOR` the `MREVIEW_*` spellings are honoured as
-fallbacks so an existing mreview setup keeps working; the exit-code and
-history vars are new to mrevdiff and have no `MREVIEW_*` equivalent.
+`MREVDIFF_HISTORY_DIR`.
 
 ## Requirements
 
@@ -235,9 +232,8 @@ Per-line/region opt-out lives in the source as `% mrevdiff-fmt: skip`
 
 ## License
 
-[MIT](LICENSE) © Leonid Petrov. Peeled from
-[mreview](https://github.com/lenis2000/mreview); the PDF-rendering
-optimizations are ported from
+[MIT](LICENSE) © Leonid Petrov. The PDF-rendering optimizations are
+ported from
 [CLI-PDF-EPUB-reader](https://github.com/lenis2000/CLI-PDF-EPUB-reader)
 (MIT), and the annotation/stdout UX follows
 [revdiff](https://github.com/umputun/revdiff) (MIT).
