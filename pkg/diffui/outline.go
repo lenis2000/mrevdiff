@@ -289,10 +289,14 @@ func (m Model) renderOutline(width, height int) string {
 		stats.FormatOnly,
 		stats.Moved,
 	)
-	if height <= 1 {
+	// Two lines precede the rows: renderPane's own pane title and this stats
+	// header. Reserve for both, otherwise renderPane's fitLines drops the last
+	// laid-out row — which, at the bottom of the list, is the cursor row.
+	rowHeight := height - 2
+	if rowHeight < 1 {
 		return clipLine(header, width)
 	}
-	body := RenderOutlineAt(rows, m.Cursor, m.SourceLineCursor, width, height-1)
+	body := RenderOutlineAt(rows, m.Cursor, m.SourceLineCursor, width, rowHeight)
 	if body == "" {
 		body = "(no pairs)"
 	}
