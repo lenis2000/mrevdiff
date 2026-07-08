@@ -118,6 +118,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if action == ActionQuit {
 		m.CountBuf = ""
+		// In full-page PDF mode, q returns to the main (region-crop)
+		// regime instead of quitting the review.
+		if m.pdfFullPage {
+			return m.runAction(ActionFullPage, 1)
+		}
 		m.quitting = true
 		return m, tea.Quit
 	}
