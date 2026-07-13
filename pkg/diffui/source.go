@@ -91,7 +91,17 @@ func renderPairSource(pair *diffreview.Pair, width, height, oldAnchorLine, newAn
 		newW = 1
 	}
 
-	rendered := make([]string, 0, max(height, len(rows)))
+	rendered, _, _, anchorRendered := sourceCombinedRenderedLines(rows, oldW, newW, oldAnchorLine, newAnchorLine, highlight)
+	return visibleRenderedLines(rendered, height, anchorRendered)
+}
+
+// sourceCombinedRenderedLines is the combined (narrow, single-pane)
+// renderer's core loop, also returning per-line old/new source numbers
+// for the mouse click mapping.
+func sourceCombinedRenderedLines(rows []sourceRow, oldW, newW, oldAnchorLine, newAnchorLine int, highlight bool) ([]string, []int, []int, int) {
+	rendered := make([]string, 0, len(rows))
+	oldNums := make([]int, 0, len(rows))
+	newNums := make([]int, 0, len(rows))
 	anchorRendered := -1
 	for rowIndex, row := range rows {
 		rowStart := len(rendered)
@@ -100,6 +110,8 @@ func renderPairSource(pair *diffreview.Pair, width, height, oldAnchorLine, newAn
 		}
 		if row.separator {
 			rendered = append(rendered, hunkSeparatorLine(oldW, newW))
+			oldNums = append(oldNums, 0)
+			newNums = append(newNums, 0)
 			continue
 		}
 		oldCursor := oldAnchorLine > 0 && row.oldLine == oldAnchorLine
@@ -117,9 +129,44 @@ func renderPairSource(pair *diffreview.Pair, width, height, oldAnchorLine, newAn
 				newCell = newLines[i]
 			}
 			rendered = append(rendered, oldCell+" │ "+newCell)
+			oldNums = append(oldNums, row.oldLine)
+			newNums = append(newNums, row.newLine)
 		}
 	}
-	return visibleRenderedLines(rendered, height, anchorRendered)
+	return rendered, oldNums, newNums, anchorRendered
+}
+
+// sourceCombinedLineAtRow maps a viewport row of the combined renderer to
+// the absolute source line of the requested side.
+func sourceCombinedLineAtRow(pair *diffreview.Pair, width, height, oldAnchorLine, newAnchorLine, rowInView int, oldSide bool) (int, bool) {
+	if rowInView < 0 || height < 1 || width < 1 {
+		return 0, false
+	}
+	rows := memoizedSourceRows(pair)
+	if len(rows) == 0 || rowInView >= height {
+		return 0, false
+	}
+	oldW := (width - 3) / 2
+	if oldW < 1 {
+		oldW = 1
+	}
+	newW := width - oldW - 3
+	if newW < 1 {
+		newW = 1
+	}
+	rendered, oldNums, newNums, anchorRendered := sourceCombinedRenderedLines(rows, oldW, newW, oldAnchorLine, newAnchorLine, true)
+	idx := visibleStart(len(rendered), height, anchorRendered) + rowInView
+	if idx < 0 || idx >= len(rendered) {
+		return 0, false
+	}
+	nums := newNums
+	if oldSide {
+		nums = oldNums
+	}
+	if nums[idx] < 1 {
+		return 0, false
+	}
+	return nums[idx], true
 }
 
 // RenderPairSourceSide renders one side of a semantic pair for the wide
@@ -141,17 +188,28 @@ func RenderPairSourceSideHighlighted(pair *diffreview.Pair, oldSide bool, width,
 }
 
 func renderPairSourceSide(pair *diffreview.Pair, oldSide bool, width, height, oldAnchorLine, newAnchorLine int, highlight bool) string {
+	rendered, _, anchorRendered := sourceSideRenderedLines(pair, oldSide, width, oldAnchorLine, newAnchorLine, highlight)
+	if rendered == nil {
+		return "(no source)"
+	}
+	return visibleRenderedLines(rendered, height, anchorRendered)
+}
+
+// sourceSideRenderedLines builds the side pane's rendered lines plus a
+// parallel slice with each rendered line's absolute source line number
+// (0 for separators and padding). The mouse click mapping shares this
+// with the renderer so a click can never land on a different line than
+// the one drawn there.
+func sourceSideRenderedLines(pair *diffreview.Pair, oldSide bool, width, oldAnchorLine, newAnchorLine int, highlight bool) ([]string, []int, int) {
 	if width < 1 {
 		width = 1
 	}
-	if height < 1 {
-		height = 1
-	}
 	rows := compactSourceRowsForSide(memoizedSourceRows(pair), oldSide)
 	if len(rows) == 0 {
-		return "(no source)"
+		return nil, nil, -1
 	}
-	rendered := make([]string, 0, max(height, len(rows)))
+	rendered := make([]string, 0, len(rows))
+	lineNums := make([]int, 0, len(rows))
 	anchorRendered := -1
 	for rowIndex, row := range rows {
 		rowStart := len(rendered)
@@ -160,10 +218,13 @@ func renderPairSourceSide(pair *diffreview.Pair, oldSide bool, width, height, ol
 		}
 		if row.separator {
 			rendered = append(rendered, hunkSeparatorSide(width))
+			lineNums = append(lineNums, 0)
 			continue
 		}
 		var lines []string
+		lineNum := row.newLine
 		if oldSide {
+			lineNum = row.oldLine
 			cursor := oldAnchorLine > 0 && row.oldLine == oldAnchorLine
 			lines = renderSourceCell(row.oldMark, row.oldLine, row.oldText, row.oldParts, width, true, highlight, cursor)
 		} else {
@@ -171,8 +232,28 @@ func renderPairSourceSide(pair *diffreview.Pair, oldSide bool, width, height, ol
 			lines = renderSourceCell(row.newMark, row.newLine, row.newText, row.newParts, width, false, highlight, cursor)
 		}
 		rendered = append(rendered, lines...)
+		for range lines {
+			lineNums = append(lineNums, lineNum)
+		}
 	}
-	return visibleRenderedLines(rendered, height, anchorRendered)
+	return rendered, lineNums, anchorRendered
+}
+
+// sourceSideLineAtRow maps a viewport row (0-based, below the pane title)
+// of the side renderer back to the absolute source line drawn there.
+func sourceSideLineAtRow(pair *diffreview.Pair, oldSide bool, width, height, oldAnchorLine, newAnchorLine, rowInView int) (int, bool) {
+	if rowInView < 0 || height < 1 {
+		return 0, false
+	}
+	rendered, lineNums, anchorRendered := sourceSideRenderedLines(pair, oldSide, width, oldAnchorLine, newAnchorLine, true)
+	if rendered == nil || rowInView >= height {
+		return 0, false
+	}
+	idx := visibleStart(len(rendered), height, anchorRendered) + rowInView
+	if idx < 0 || idx >= len(lineNums) || lineNums[idx] < 1 {
+		return 0, false
+	}
+	return lineNums[idx], true
 }
 
 func sourceRows(pair *diffreview.Pair) []sourceRow {
@@ -1097,6 +1178,19 @@ func visibleRenderedLines(lines []string, height int, anchor int) string {
 	if len(lines) <= height {
 		return strings.Join(lines, "\n")
 	}
+	start := visibleStart(len(lines), height, anchor)
+	return strings.Join(lines[start:start+height], "\n")
+}
+
+// visibleStart computes the scroll window's first rendered line — shared
+// by the renderers and the mouse click mapping so they cannot disagree.
+func visibleStart(total, height, anchor int) int {
+	if height < 1 {
+		height = 1
+	}
+	if total <= height {
+		return 0
+	}
 	start := 0
 	if anchor >= 0 {
 		start = anchor - height/3
@@ -1104,10 +1198,10 @@ func visibleRenderedLines(lines []string, height int, anchor int) string {
 	if start < 0 {
 		start = 0
 	}
-	if start > len(lines)-height {
-		start = len(lines) - height
+	if start > total-height {
+		start = total - height
 	}
-	return strings.Join(lines[start:start+height], "\n")
+	return start
 }
 
 func sourceRowMatchesAnchor(row sourceRow, rowIndex int, oldAnchorLine, newAnchorLine int) bool {

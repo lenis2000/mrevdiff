@@ -604,9 +604,21 @@ func (m Model) statusText() string {
 		stats.Moved,
 	)
 	if m.Status == "" {
-		return base
+		return base + "  ·  ? help · : cmds · / search"
 	}
 	return base + " | " + m.Status
+}
+
+// statusLine fits statusText into width. When the full line doesn't fit,
+// the transient message wins over the stats block — on a narrow terminal
+// the tail of the line is exactly where destructive-action warnings (the
+// Q-discard confirmation, rebuild failures) would otherwise get clipped.
+func (m Model) statusLine(width int) string {
+	full := m.statusText()
+	if clipped := clipLine(full, width); clipped == full || m.Status == "" {
+		return clipped
+	}
+	return clipLine(m.Status, width)
 }
 
 func pairMatchesFilter(

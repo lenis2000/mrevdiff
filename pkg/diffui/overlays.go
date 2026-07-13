@@ -20,6 +20,11 @@ type searchState struct {
 	// Matches are indices into Review.Pairs, in review order.
 	Matches []int
 	Pos     int
+	// OriginCursor/OriginLine remember where the cursor was when / was
+	// pressed: incremental search jumps live while typing, and Esc must
+	// put the cursor back.
+	OriginCursor int
+	OriginLine   int
 }
 
 // annListEntry is one row of the @ annotation-list overlay.
@@ -38,7 +43,7 @@ type annListState struct {
 
 // startSearch opens the / prompt in the status line.
 func (m Model) startSearch() (tea.Model, tea.Cmd) {
-	m.Search = &searchState{Typing: true}
+	m.Search = &searchState{Typing: true, OriginCursor: m.Cursor, OriginLine: m.SourceLineCursor}
 	m.Status = "/"
 	return m, nil
 }
@@ -48,9 +53,13 @@ func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := m.Search
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
+		// Undo any live incremental jump.
+		m.Cursor = s.OriginCursor
+		m.SourceLineCursor = s.OriginLine
+		m.snapCursor()
 		m.Search = nil
 		m.Status = "search cancelled"
-		return m, nil
+		return m.withPDFRender()
 	case tea.KeyEnter:
 		s.Typing = false
 		s.Query = s.Input
@@ -65,8 +74,60 @@ func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeySpace:
 		s.Input += " "
 	}
-	m.Status = "/" + s.Input
-	return m, nil
+	return m.incrementalSearch()
+}
+
+// incrementalSearch runs the query live while it is being typed: the
+// status line carries the match count, and the cursor follows the first
+// match at or after the search origin (Esc restores the origin).
+func (m Model) incrementalSearch() (tea.Model, tea.Cmd) {
+	s := m.Search
+	query := strings.TrimSpace(s.Input)
+	if query == "" {
+		m.Cursor = s.OriginCursor
+		m.SourceLineCursor = s.OriginLine
+		m.snapCursor()
+		m.Status = "/" + s.Input
+		return m.withPDFRender()
+	}
+	matches := m.searchMatches(query)
+	if len(matches) == 0 {
+		m.Cursor = s.OriginCursor
+		m.SourceLineCursor = s.OriginLine
+		m.snapCursor()
+		m.Status = fmt.Sprintf("/%s (no matches)", s.Input)
+		return m.withPDFRender()
+	}
+	target := matches[0]
+	for _, idx := range matches {
+		if idx >= s.OriginCursor {
+			target = idx
+			break
+		}
+	}
+	m.Cursor = target
+	m.SourceLineCursor = 1
+	m.snapCursor()
+	m.Status = fmt.Sprintf("/%s (%d matches)", s.Input, len(matches))
+	return m.withPDFRender()
+}
+
+// searchMatches returns the pairs visible under the current filter whose
+// content matches the query.
+func (m Model) searchMatches(query string) []int {
+	if m.Review == nil {
+		return nil
+	}
+	var matches []int
+	for _, idx := range m.visibleIndices() {
+		if idx < 0 || idx >= len(m.Review.Pairs) {
+			continue
+		}
+		if pairMatchesQuery(&m.Review.Pairs[idx], query) {
+			matches = append(matches, idx)
+		}
+	}
+	return matches
 }
 
 // pairMatchesQuery reports whether the pair's ID, labels, or either side's
@@ -102,19 +163,24 @@ func (m Model) runSearch() (tea.Model, tea.Cmd) {
 		m.Status = "search cancelled"
 		return m, nil
 	}
-	s.Matches = s.Matches[:0]
-	if m.Review != nil {
-		for _, idx := range m.visibleIndices() {
-			if idx < 0 || idx >= len(m.Review.Pairs) {
-				continue
-			}
-			if pairMatchesQuery(&m.Review.Pairs[idx], s.Query) {
-				s.Matches = append(s.Matches, idx)
+	s.Matches = m.searchMatches(s.Query)
+	if len(s.Matches) == 0 {
+		// The query may hit only pairs hidden by the current filter —
+		// dead-ending there without saying so reads as "text not found".
+		hidden := 0
+		if m.Review != nil {
+			for i := range m.Review.Pairs {
+				if pairMatchesQuery(&m.Review.Pairs[i], s.Query) {
+					hidden++
+				}
 			}
 		}
-	}
-	if len(s.Matches) == 0 {
-		m.Status = fmt.Sprintf("no match for %q (filter: %s)", s.Query, m.Filter.String())
+		if hidden > 0 {
+			m.Status = fmt.Sprintf("no match for %q under filter:%s — %d match(es) in other pairs (press f to widen)",
+				s.Query, m.Filter.String(), hidden)
+		} else {
+			m.Status = fmt.Sprintf("no match for %q (filter: %s)", s.Query, m.Filter.String())
+		}
 		return m, nil
 	}
 	// First match at or after the cursor, wrapping.

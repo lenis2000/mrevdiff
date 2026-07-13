@@ -142,3 +142,47 @@ func TestInfoOverlayShowsScopeAndDescription(t *testing.T) {
 		t.Fatalf("any key should close the info popup")
 	}
 }
+
+// TestIncrementalSearchJumpsWhileTypingAndEscRestores pins the / UX: the
+// cursor follows the first match live as the query is typed, the status
+// carries a match count, and Esc puts the cursor back where / was pressed.
+func TestIncrementalSearchJumpsWhileTypingAndEscRestores(t *testing.T) {
+	m := New(fixtureReview(), Options{})
+	m.Width = 120
+	m.Height = 30
+	origin := m.Cursor
+
+	m = pressKey(t, m, "/")
+	for _, r := range "Added" {
+		m = pressKey(t, m, string(r))
+	}
+	if m.Review.Pairs[m.Cursor].ID != "added" {
+		t.Fatalf("incremental search should jump to the added pair, cursor on %q", m.Review.Pairs[m.Cursor].ID)
+	}
+	if !strings.Contains(m.Status, "match") {
+		t.Fatalf("status should carry a live match count, got %q", m.Status)
+	}
+	m = pressSpecial(t, m, tea.KeyEsc)
+	if m.Cursor != origin {
+		t.Fatalf("Esc should restore the search origin cursor %d, got %d", origin, m.Cursor)
+	}
+}
+
+// TestSearchReportsFilterHiddenMatches pins the widened no-match report:
+// a query that only hits pairs hidden by the active filter must say so
+// instead of dead-ending on "no match".
+func TestSearchReportsFilterHiddenMatches(t *testing.T) {
+	m := New(fixtureReview(), Options{})
+	m.Width = 120
+	m.Height = 30
+	m.Filter = FilterChanged // hides the unchanged pair
+
+	m = pressKey(t, m, "/")
+	for _, r := range "Same paragraph" {
+		m = pressKey(t, m, string(r))
+	}
+	m = pressSpecial(t, m, tea.KeyEnter)
+	if !strings.Contains(m.Status, "other pairs") {
+		t.Fatalf("no-match status should mention filter-hidden matches, got %q", m.Status)
+	}
+}

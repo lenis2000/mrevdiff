@@ -365,16 +365,7 @@ func RenderOutlineAt(rows []OutlineRow, cursorPairIndex, sourceLineCursor int, w
 	}
 
 	cursorRow := outlineCursorRow(rows, cursorPairIndex, sourceLineCursor)
-	start := cursorRow - height/2
-	if start < 0 {
-		start = 0
-	}
-	if start > len(rows)-height {
-		start = len(rows) - height
-		if start < 0 {
-			start = 0
-		}
-	}
+	start := outlineScrollStart(len(rows), cursorRow, height)
 	end := start + height
 	if end > len(rows) {
 		end = len(rows)
@@ -415,6 +406,23 @@ func RenderOutlineAt(rows []OutlineRow, cursorPairIndex, sourceLineCursor int, w
 		rendered = append(rendered, clipLine(line, width))
 	}
 	return strings.Join(rendered, "\n")
+}
+
+// outlineScrollStart computes the first visible outline row for a
+// viewport of `height` rows — shared by RenderOutlineAt and the mouse
+// click mapping so a click always lands on the row drawn at that y.
+func outlineScrollStart(rowCount, cursorRow, height int) int {
+	start := cursorRow - height/2
+	if start < 0 {
+		start = 0
+	}
+	if start > rowCount-height {
+		start = rowCount - height
+		if start < 0 {
+			start = 0
+		}
+	}
+	return start
 }
 
 func outlineCursorRow(rows []OutlineRow, cursorPairIndex, sourceLineCursor int) int {

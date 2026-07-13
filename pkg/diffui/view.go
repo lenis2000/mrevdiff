@@ -101,7 +101,7 @@ func (m Model) View() string {
 		pdf := m.renderPDFPane(pdfW, bodyHeight, m.Focus == PanePDF)
 		main = lipgloss.JoinHorizontal(lipgloss.Top, outline, comparison, pdf)
 	}
-	status := clipLine(m.statusText(), m.Width)
+	status := m.statusLine(m.Width)
 	view := lipgloss.JoinVertical(lipgloss.Left, main, status)
 	if m.Layout == LayoutNoPDF && m.KittyAvailable {
 		// Kitty graphics persist independently of the terminal text grid. When the
