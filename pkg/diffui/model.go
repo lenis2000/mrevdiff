@@ -366,7 +366,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		Description:        opts.Description,
 		Keymap:             opts.Keymap,
 		SourceLineCursor:   1,
-		Layout:             LayoutNoPDF,
+		Layout:             LayoutStacked,
 		Focus:              PaneOutline,
 		OutlineFrac:        defaultOutlineFrac,
 		PDFFrac:            defaultPDFFrac,

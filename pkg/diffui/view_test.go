@@ -8,19 +8,19 @@ import (
 	"github.com/lenis2000/mrevdiff/pkg/pdf"
 )
 
-func TestWideViewDefaultsToFileMergeLayoutWithoutPDFPane(t *testing.T) {
+func TestWideViewDefaultsToStackedLayoutWithAllPanes(t *testing.T) {
 	m := New(fixtureReview(), Options{})
 	m.Width = 160
 	m.Height = 24
 
+	if m.Layout != LayoutStacked {
+		t.Fatalf("default layout = %v, want stacked (PDF below)", m.Layout)
+	}
 	view := m.View()
-	for _, want := range []string{"Outline", "Old source", "New source"} {
+	for _, want := range []string{"Outline", "Old source", "New source", "PDF"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("wide view missing %q:\n%s", want, view)
 		}
-	}
-	if strings.Contains(view, "PDF") {
-		t.Fatalf("default diff view should hide PDF pane:\n%s", view)
 	}
 }
 

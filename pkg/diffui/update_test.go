@@ -358,6 +358,7 @@ func TestLayoutToggleAndPaneResize(t *testing.T) {
 	m := New(fixtureReview(), Options{})
 	m.Width = 140
 	m.Height = 30
+	m.Layout = LayoutNoPDF
 
 	m = pressKey(t, m, "\\")
 	if m.Layout != LayoutThreeCol {
