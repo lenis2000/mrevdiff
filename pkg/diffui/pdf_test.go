@@ -11,6 +11,7 @@ import (
 	"github.com/lenis2000/mrevdiff/pkg/diffreview"
 	"github.com/lenis2000/mrevdiff/pkg/pdf"
 	"github.com/lenis2000/mrevdiff/pkg/synctex"
+	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
 func TestPrepareNewPDFUsesNewFilesystemEndpoint(t *testing.T) {
@@ -191,8 +192,7 @@ func TestApplyPDFReloadClearsOldArtifactsWhenReloadHasNoPair(t *testing.T) {
 
 func TestPrepareNewPDFSkipsBuildWhenLmkfIsWatching(t *testing.T) {
 	review, _, newPath := pdfReviewFixture(t)
-	statusFile := writeLmkfStatus(t, newPath)
-	t.Cleanup(func() { _ = os.Remove(statusFile) })
+	fakeLmkfWatcher(t, newPath)
 	marker := filepath.Join(t.TempDir(), "built.txt")
 	t.Setenv("MARKER", marker)
 
@@ -210,8 +210,7 @@ func TestPrepareNewPDFSkipsBuildWhenLmkfIsWatching(t *testing.T) {
 
 func TestDiffPDFReloadWaitsForLmkfAndOpensFreshArtifacts(t *testing.T) {
 	_, _, newPath := pdfReviewFixture(t)
-	statusFile := writeLmkfStatus(t, newPath)
-	t.Cleanup(func() { _ = os.Remove(statusFile) })
+	fakeLmkfWatcher(t, newPath)
 	installSampleArtifacts(t, newPath)
 	writeLmkfLog(t, newPath, "Here is how much of TeX's memory you used")
 	markLmkfFilesFresh(t, newPath)
@@ -231,10 +230,13 @@ func TestDiffPDFReloadWaitsForLmkfAndOpensFreshArtifacts(t *testing.T) {
 	}
 }
 
-func TestDiffPDFReloadReportsLmkfErrors(t *testing.T) {
+// TestDiffPDFReloadReportsLmkfErrorsButOpensFreshArtifacts pins that a
+// pass with log errors (e.g. an undefined citation mid-edit) is reported
+// as failed while its perfectly viewable artifacts are still opened —
+// only genuinely stale artifacts leave the pane on the old frame.
+func TestDiffPDFReloadReportsLmkfErrorsButOpensFreshArtifacts(t *testing.T) {
 	_, _, newPath := pdfReviewFixture(t)
-	statusFile := writeLmkfStatus(t, newPath)
-	t.Cleanup(func() { _ = os.Remove(statusFile) })
+	fakeLmkfWatcher(t, newPath)
 	installSampleArtifacts(t, newPath)
 	writeLmkfLog(t, newPath, "! Undefined control sequence\nHere is how much of TeX's memory you used")
 	markLmkfFilesFresh(t, newPath)
@@ -243,8 +245,14 @@ func TestDiffPDFReloadReportsLmkfErrors(t *testing.T) {
 	if msg.NewPDF != nil {
 		defer func() { _ = msg.NewPDF.Close() }()
 	}
-	if !msg.BuildStale {
-		t.Fatalf("lmkf error should mark build stale: %#v", msg)
+	if !msg.Failed {
+		t.Fatalf("lmkf error should mark the reload failed: %#v", msg)
+	}
+	if msg.BuildStale {
+		t.Fatalf("fresh artifacts must not be marked stale on a log error: %#v", msg)
+	}
+	if msg.NewPDF == nil || msg.NewSyncTeX == nil {
+		t.Fatalf("fresh artifacts should be opened despite the log error: %#v", msg)
 	}
 	if !strings.Contains(msg.Status, "lmkf rebuild error") || !strings.Contains(msg.Status, "Undefined control sequence") {
 		t.Fatalf("expected lmkf error status, got %q", msg.Status)
@@ -357,20 +365,14 @@ func pdfReviewFixture(t *testing.T) (*diffreview.Review, string, string) {
 	}, oldPath, newPath
 }
 
-func writeLmkfStatus(t *testing.T, texPath string) string {
+// fakeLmkfWatcher registers texPath as lmkf-watched (status file + live
+// lock) and shrinks the wait timings so reload tests run fast.
+func fakeLmkfWatcher(t *testing.T, texPath string) {
 	t.Helper()
-	abs, err := filepath.Abs(texPath)
+	cleanup, err := ui.FakeLmkfWatcherForTest(texPath)
 	if err != nil {
-		t.Fatalf("abs tex path: %v", err)
+		t.Fatalf("fake lmkf watcher: %v", err)
 	}
-	statusDir := "/tmp/lmkf-status"
-	if err := os.MkdirAll(statusDir, 0o755); err != nil {
-		t.Fatalf("mkdir lmkf status: %v", err)
-	}
-	statusFile := filepath.Join(statusDir, filepath.Base(filepath.Dir(abs)))
-	logPath := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".log"
-	if err := os.WriteFile(statusFile, []byte(logPath), 0o600); err != nil {
-		t.Fatalf("write lmkf status: %v", err)
-	}
-	return statusFile
+	t.Cleanup(cleanup)
+	t.Cleanup(ui.SetLmkfWaitTimingsForTest(10*time.Millisecond, 100*time.Millisecond))
 }

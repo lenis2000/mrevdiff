@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -101,15 +102,39 @@ func PrepareNewPDF(review *diffreview.Review, opts PDFOptions) (*PDFArtifacts, e
 	res := build.ResolveBuildOutputsOnDisk(path)
 	status := ""
 	buildStale := false
-	lmkfActive := ui.LmkfWatching(path)
-	if !opts.NoBuild && !lmkfActive {
-		buildCmd := opts.BuildCmd
+	watch, projectWatched := ui.LmkfWatchFor(path)
+	switch {
+	case projectWatched && ui.LmkfWatching(path):
+		status = "lmkf is building this paper — skipped own latexmk"
+		if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+			buildStale = true
+		}
+	case projectWatched:
+		// lmkf builds a different main file in this project; the reviewed
+		// file is one of its \input dependencies. Adopt the main file's
+		// artefacts (synctex records map per input file) and never launch
+		// a competing latexmk.
+		res = build.ResolveBuildOutputsOnDisk(watch.MainTex)
+		status = "lmkf builds " + filepath.Base(watch.MainTex) + " — using its PDF"
+		if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+			buildStale = true
+		}
+	case !opts.NoBuild:
+		release, holder, ok := ui.AcquireLmkBuildLock(path)
+		if !ok {
+			status = "latexmk already running (" + holder + ") — using current artifacts"
+			if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+				buildStale = true
+			}
+			break
+		}
 		runRes, err := build.RunWith(build.Options{
 			TexPath:  path,
-			BuildCmd: buildCmd,
+			BuildCmd: opts.BuildCmd,
 			Stderr:   opts.Stderr,
 			Ctx:      opts.Ctx,
 		})
+		release()
 		if runRes != nil {
 			res = runRes
 		}
@@ -121,11 +146,6 @@ func PrepareNewPDF(review *diffreview.Review, opts PDFOptions) (*PDFArtifacts, e
 			if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
 				buildStale = true
 			}
-		}
-	} else if lmkfActive {
-		status = "lmkf is building this paper — skipped own latexmk"
-		if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
-			buildStale = true
 		}
 	}
 	applyBuildMetadata(review, res)
@@ -184,23 +204,38 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 			if waitRes != nil {
 				res = waitRes
 			}
+			// Error/timeout still open whatever artefacts exist (matching
+			// the own-latexmk path below): an undefined-citation warning
+			// counts as an error but the pass usually wrote a perfectly
+			// viewable PDF, and refusing to load it left the pane dead.
 			switch lmkf.Status {
 			case ui.LmkfRebuildOK:
 				status = "lmkf rebuild ok"
 			case ui.LmkfRebuildError:
 				status = "lmkf rebuild error — " + lmkf.ErrorLine
-				buildStale = true
 				failed = true
+				if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+					buildStale = true
+				}
 			default:
 				status = "lmkf didn't finish in time (edit saved anyway)"
-				buildStale = true
 				failed = true
+				if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+					buildStale = true
+				}
+			}
+		} else if release, holder, ok := ui.AcquireLmkBuildLock(path); !ok {
+			status = "latexmk already running (" + holder + ") — reload once it finishes"
+			failed = true
+			if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
+				buildStale = true
 			}
 		} else {
 			runRes, err := build.RunWith(build.Options{
 				TexPath:  path,
 				BuildCmd: buildCmd,
 			})
+			release()
 			if runRes != nil {
 				res = runRes
 			}
