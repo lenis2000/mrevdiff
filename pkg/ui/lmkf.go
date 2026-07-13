@@ -95,7 +95,47 @@ func LmkfWatchFor(texPath string) (LmkfWatch, bool) {
 	if _, alive := lmkLockHolder(canonicalPath(mainTex)); !alive {
 		return LmkfWatch{}, false
 	}
+	// The status file is keyed by directory, so every .tex in an lmkf-watched
+	// directory looks watched — including a referee response or slides that
+	// the main file never \inputs. Adopting the main file's PDF for those
+	// shows the wrong document and makes every rebuild wait out the timeout.
+	// latexmk's .fls lists what the pass actually read, so use it to insist
+	// the reviewed file really is part of this build.
+	if !texPartOfBuild(logPath, mainTex, abs) {
+		return LmkfWatch{}, false
+	}
 	return LmkfWatch{LogPath: logPath, MainTex: mainTex}, true
+}
+
+// texPartOfBuild reports whether texPath is the watched main file or one of
+// its \input dependencies. Only a readable .fls that demonstrably does *not*
+// list texPath is taken as proof of absence: while the first pass is still
+// running there is no .fls yet, and assuming independence there would send a
+// multi-file paper's chapter off to compile standalone.
+func texPartOfBuild(logPath, mainTex, texPath string) bool {
+	if canonicalPath(mainTex) == canonicalPath(texPath) {
+		return true
+	}
+	fls, err := os.ReadFile(strings.TrimSuffix(logPath, ".log") + ".fls")
+	if err != nil {
+		return true
+	}
+	dir := filepath.Dir(logPath)
+	want := canonicalPath(texPath)
+	for _, line := range strings.Split(string(fls), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "INPUT ")
+		if !ok {
+			continue
+		}
+		rest = strings.TrimSpace(rest)
+		if !filepath.IsAbs(rest) {
+			rest = filepath.Join(dir, rest)
+		}
+		if canonicalPath(rest) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // LmkfWatching reports whether LP's lmkf shell function is running

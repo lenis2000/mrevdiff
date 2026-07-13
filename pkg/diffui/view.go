@@ -129,15 +129,15 @@ func (m Model) renderComparisonArea(width, height int) string {
 	oldAnchor, newAnchor := m.sourceAnchorLines()
 	pair := m.CurrentDisplayPair()
 	if m.Layout != LayoutStacked && comparisonCombined(width) {
-		body := RenderPairSourceHighlighted(pair, width-2, height-2, oldAnchor, newAnchor)
+		body := RenderPairSourceHighlighted(pair, width-2, sourceBodyRows(height), oldAnchor, newAnchor)
 		return m.renderPaneRaw("Source", body, width, height, m.Focus == PaneOldSource || m.Focus == PaneNewSource)
 	}
 	oldW, newW := m.sourcePaneWidths(width)
 	// In split panes, each side owns its own scroll anchor. Passing the new
 	// anchor into the old pane (or conversely) lets inserted/deleted placeholder
 	// rows steal the match and makes the visible source window jump around.
-	oldBody := RenderPairSourceSideHighlighted(pair, true, oldW-2, height-2, oldAnchor, 0)
-	newBody := RenderPairSourceSideHighlighted(pair, false, newW-2, height-2, 0, newAnchor)
+	oldBody := RenderPairSourceSideHighlighted(pair, true, oldW-2, sourceBodyRows(height), oldAnchor, 0)
+	newBody := RenderPairSourceSideHighlighted(pair, false, newW-2, sourceBodyRows(height), 0, newAnchor)
 	oldSource := m.overlaySourceScrollbar(
 		m.renderPaneRaw("Old source", oldBody, oldW, height, m.Focus == PaneOldSource), true, oldW-2, height)
 	newSource := m.overlaySourceScrollbar(
@@ -157,7 +157,7 @@ func (m Model) renderNewSourceArea(width, height int) string {
 	}
 	_, newAnchor := m.sourceAnchorLines()
 	pair := m.CurrentDisplayPair()
-	body := RenderPairSourceSideHighlighted(pair, false, width-2, height-2, 0, newAnchor)
+	body := RenderPairSourceSideHighlighted(pair, false, width-2, sourceBodyRows(height), 0, newAnchor)
 	return m.overlaySourceScrollbar(
 		m.renderPaneRaw("New source", body, width, height, m.Focus == PaneNewSource), false, width-2, height)
 }
@@ -207,6 +207,16 @@ func (m Model) renderPane(title, body string, width, height int, focusedOpt ...b
 		style = m.Styles.PaneFocused
 	}
 	return style.Width(innerW).Height(innerH).Border(lipgloss.NormalBorder()).Render(content)
+}
+
+// sourceBodyRows is how many source rows renderPaneRaw actually paints in a
+// pane of the given total height: the top border, the title, and the bottom
+// border eat three rows. The renderers, the scroll thumb and the click
+// mapping must all size their window with this, or they drift by one and the
+// row that gets clipped is the bottom one — which is exactly where the source
+// cursor sits at the end of a block.
+func sourceBodyRows(paneHeight int) int {
+	return paneHeight - 3
 }
 
 func (m Model) renderPaneRaw(title, body string, width, height int, focused bool) string {
@@ -683,6 +693,8 @@ func (m Model) helpSections() []helpSection {
 			{k(ActionAnnotateEdit), "edit annotation"},
 			{k(ActionAnnotateDelete), "delete annotation"},
 			{k(ActionAnnotationList), "annotation list (enter jumps, d deletes)"},
+			{pair(ActionAnnotPrev, ActionAnnotNext), "previous / next annotated pair"},
+			{k(ActionSidecarFlush), "write annotations to the sidecar now (no quit)"},
 			{k(ActionCopy), "copy selected change (side follows focus)"},
 			{k(ActionFilterCycle), "cycle filter"},
 			{k(ActionRegimeToggle), "semantic / coalesced diff regime"},

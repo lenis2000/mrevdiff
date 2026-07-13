@@ -55,10 +55,9 @@ func (m Model) overlayOutlineScrollbar(pane string, bodyHeight int) string {
 }
 
 // overlaySourceScrollbar decorates a rendered source pane, mirroring
-// renderPairSourceSide's window math (the renderer is asked for
-// paneHeight-2 lines; the pane displays one fewer).
+// renderPairSourceSide's window math.
 func (m Model) overlaySourceScrollbar(pane string, oldSide bool, innerW, paneHeight int) string {
-	windowH := paneHeight - 2
+	windowH := sourceBodyRows(paneHeight)
 	if windowH < 1 {
 		return pane
 	}

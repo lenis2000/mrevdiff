@@ -1,11 +1,13 @@
 package diffui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +25,52 @@ const (
 	deletedPDFPlaceholder = "(deleted block — no new PDF location)"
 	addedPDFPlaceholder   = "(added block — no old PDF location)"
 )
+
+// activeBuild is the one latexmk mrevdiff may have running. Since bf3a198 the
+// build runs on a tea.Cmd goroutine, and Bubble Tea abandons in-flight Cmds on
+// quit — so neither the latexmk child nor the lmk-guard lock can be cleaned up
+// from inside that goroutine. Both are parked here instead, where StopBuild
+// can reach them on the way out of the TUI. Without this, quitting mid-build
+// left latexmk compiling as an orphan and the lock dir behind holding a dead
+// pid, which the next lmk/lmkf reaps before starting a second, racing latexmk.
+var activeBuild struct {
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	release func()
+}
+
+func setActiveBuild(cancel context.CancelFunc, release func()) {
+	activeBuild.mu.Lock()
+	activeBuild.cancel, activeBuild.release = cancel, release
+	activeBuild.mu.Unlock()
+}
+
+// finishActiveBuild releases the lock and drops the handle. Safe to call twice:
+// whichever of the build goroutine and StopBuild gets here first does the work.
+func finishActiveBuild() {
+	activeBuild.mu.Lock()
+	release := activeBuild.release
+	activeBuild.cancel, activeBuild.release = nil, nil
+	activeBuild.mu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// StopBuild kills an in-flight own-latexmk run and releases its lmk-guard lock.
+// runDiff calls it once the Bubble Tea program returns, before the process exits.
+func StopBuild() {
+	activeBuild.mu.Lock()
+	cancel, release := activeBuild.cancel, activeBuild.release
+	activeBuild.cancel, activeBuild.release = nil, nil
+	activeBuild.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if release != nil {
+		release()
+	}
+}
 
 // PDFOptions controls startup PDF preparation for diff mode.
 type PDFOptions struct {
@@ -155,10 +203,23 @@ func (m Model) startPDFReload(runBuild bool) (Model, tea.Cmd) {
 		m.Status = "B: new endpoint is not a filesystem file"
 		return m, nil
 	}
+	// Never run two of our own builds at once. Since the startup build went
+	// into the background, a reload requested while it is still running used
+	// to take mrevdiff's own lmk-guard lock as "latexmk already running" and
+	// then discard the real result on the generation check, wedging the pane
+	// on "(new PDF needs rebuild)". Coalesce instead: remember that another
+	// pass is wanted and run it when this one lands, so a rebuild asked for
+	// after an edit still sees the edit.
+	if m.buildInFlight {
+		m.buildQueued = m.buildQueued || runBuild
+		m.Status = "build already running — will rebuild when it finishes"
+		return m, nil
+	}
 	m.pdfReloadGen++
 	gen := m.pdfReloadGen
 	oldPDF := m.PDF
 	buildCmd := m.BuildCmd
+	m.buildInFlight = true
 	// Keep the previous frame painted while the rebuild runs — blanking
 	// the pane here is exactly the mid-recompile flicker the id-based
 	// swap exists to avoid. The status line carries the progress.
@@ -212,11 +273,17 @@ func performDiffPDFReload(path string, gen int, oldPDF *pdf.Doc, buildCmd string
 				buildStale = true
 			}
 		} else {
+			// Park the child's cancel and the lock release where StopBuild can
+			// reach them: this goroutine is abandoned if the user quits mid-build.
+			ctx, cancel := context.WithCancel(context.Background())
+			setActiveBuild(cancel, release)
 			runRes, err := build.RunWith(build.Options{
 				TexPath:  path,
 				BuildCmd: buildCmd,
+				Ctx:      ctx,
 			})
-			release()
+			cancel()
+			finishActiveBuild()
 			if runRes != nil {
 				res = runRes
 			}
@@ -274,6 +341,7 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	m.buildInFlight = false
 	if !msg.BuildStale && m.Review != nil && m.Review.NewDoc != nil {
 		if msg.Aux != nil {
 			parser.ApplyAux(m.Review.NewDoc, msg.Aux)
@@ -290,6 +358,9 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 		m.PDF = msg.NewPDF
 		m.Synctex = msg.NewSyncTeX
 		populateNewPDFRegions(m.Review, msg.NewSyncTeX)
+		if m.Review != nil {
+			m.pageLayout.SetDocRegions(m.Review.NewDoc)
+		}
 	} else {
 		if msg.NewPDF != nil {
 			_ = msg.NewPDF.Close()
@@ -315,6 +386,12 @@ func (m Model) applyPDFReload(msg diffPDFReloadMsg) (Model, tea.Cmd) {
 	m.PDFStatus = ""
 	if msg.Status != "" {
 		m.Status = msg.Status
+	}
+	// A rebuild asked for while this pass was in flight (typically an edit)
+	// is not reflected in the result we just applied — run the extra pass now.
+	if m.buildQueued {
+		m.buildQueued = false
+		return m.startPDFReload(true)
 	}
 	if msg.BuildStale {
 		if m.PDFStatus == "" {
@@ -360,9 +437,15 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		}
 		pdfDoc = m.OldPDF
 		idx = m.OldSynctex
-	} else if m.BuildStale || m.PDF == nil || m.Synctex == nil {
+	} else if m.PDF == nil || m.Synctex == nil {
 		return nil
 	}
+	// BuildStale deliberately does NOT stop the render. The artefacts we hold
+	// are the previously loaded ones — stale against the source, but still a
+	// valid document — and the whole point of building in the background is
+	// that the reviewer keeps navigating while it runs. Refusing to render
+	// here froze the pane on whichever pair happened to be under the cursor
+	// when the build started; the status line already says it is rebuilding.
 	if block == nil {
 		return nil
 	}

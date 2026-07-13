@@ -531,7 +531,7 @@ func partsFromLineTokens(lines []string, tokens []lineToken, kinds []sourcePartK
 			kind = kinds[i]
 		}
 		if tok.Line >= 0 && tok.Line < len(parts) {
-			parts[tok.Line] = appendPart(parts[tok.Line], kind, tok.Text)
+			parts[tok.Line] = appendPart(parts[tok.Line], kind, false, tok.Text)
 		}
 	}
 	for i, line := range lines {
@@ -803,15 +803,19 @@ func displayPairScore(oldLine, newLine, oldMark, newMark string, score float64) 
 	return 0, false
 }
 
-func appendPart(parts []sourcePart, kind sourcePartKind, text string) []sourcePart {
+// appendPart carries Search alongside Kind: a run flagged by
+// decorateSearchParts must survive wrapping, and it may only merge into a
+// neighbour that agrees on both, or the highlight is folded back into the
+// surrounding diff styling and never paints.
+func appendPart(parts []sourcePart, kind sourcePartKind, search bool, text string) []sourcePart {
 	if text == "" {
 		return parts
 	}
-	if len(parts) > 0 && parts[len(parts)-1].Kind == kind {
-		parts[len(parts)-1].Text += text
+	if n := len(parts); n > 0 && parts[n-1].Kind == kind && parts[n-1].Search == search {
+		parts[n-1].Text += text
 		return parts
 	}
-	return append(parts, sourcePart{Text: text, Kind: kind})
+	return append(parts, sourcePart{Text: text, Kind: kind, Search: search})
 }
 
 func tokenizeLatex(s string) []string {
@@ -1016,7 +1020,7 @@ func wrapPartsHard(parts []sourcePart, width int) [][]sourcePart {
 			if take > space {
 				take = space
 			}
-			cur = appendPart(cur, part.Kind, string(runes[:take]))
+			cur = appendPart(cur, part.Kind, part.Search, string(runes[:take]))
 			curW += take
 			runes = runes[take:]
 			if curW >= width && len(runes) > 0 {

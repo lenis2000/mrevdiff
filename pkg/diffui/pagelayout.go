@@ -23,15 +23,47 @@ import (
 type pageLayoutCache struct {
 	mu      sync.Mutex
 	entries map[pageLayoutKey]bool
+	// widths holds each doc's per-page region widths, snapshotted on the UI
+	// goroutine by SetDocRegions. The render and prefetch goroutines read
+	// these instead of walking parser.Block.PDFRegion, which the UI goroutine
+	// rewrites wholesale on every PDF reload — reading the blocks directly
+	// from a goroutine was a genuine data race on the region pointers.
+	widths map[*parser.Document]map[int][]float64
 }
 
 type pageLayoutKey struct {
+	doc   *parser.Document
 	mtime int64
 	page  int
 }
 
 func newPageLayoutCache() *pageLayoutCache {
-	return &pageLayoutCache{entries: map[pageLayoutKey]bool{}}
+	return &pageLayoutCache{
+		entries: map[pageLayoutKey]bool{},
+		widths:  map[*parser.Document]map[int][]float64{},
+	}
+}
+
+// SetDocRegions snapshots doc's mapped region widths per page. Call it on the
+// UI goroutine immediately after (re)populating Block.PDFRegion.
+func (c *pageLayoutCache) SetDocRegions(doc *parser.Document) {
+	if c == nil || doc == nil {
+		return
+	}
+	byPage := map[int][]float64{}
+	for _, b := range doc.Blocks {
+		if b == nil || b.PDFRegion == nil || b.PDFRegion.W <= 0 {
+			continue
+		}
+		byPage[b.PDFRegion.Page] = append(byPage[b.PDFRegion.Page], b.PDFRegion.W)
+	}
+	c.mu.Lock()
+	if c.widths == nil {
+		c.widths = map[*parser.Document]map[int][]float64{}
+	}
+	c.widths[doc] = byPage
+	c.entries = map[pageLayoutKey]bool{}
+	c.mu.Unlock()
 }
 
 // IsMultiColumn returns true when the page's block widths suggest a
@@ -46,13 +78,16 @@ func (c *pageLayoutCache) IsMultiColumn(d *pdf.Doc, doc *parser.Document, page i
 	if c == nil || d == nil || doc == nil || page < 1 {
 		return false
 	}
-	key := pageLayoutKey{mtime: d.Mtime().UnixNano(), page: page}
+	key := pageLayoutKey{doc: doc, mtime: d.Mtime().UnixNano(), page: page}
 
+	// doc is only ever a map key here — never dereferenced — so this stays off
+	// the blocks the UI goroutine is free to rewrite underneath us.
 	c.mu.Lock()
 	if v, ok := c.entries[key]; ok {
 		c.mu.Unlock()
 		return v
 	}
+	widths := append([]float64(nil), c.widths[doc][page]...)
 	c.mu.Unlock()
 
 	bounds, err := d.Bounds(page - 1)
@@ -62,17 +97,6 @@ func (c *pageLayoutCache) IsMultiColumn(d *pdf.Doc, doc *parser.Document, page i
 	pageW := float64(bounds.Dx())
 	if pageW < 1 {
 		return false
-	}
-
-	var widths []float64
-	for _, b := range doc.Blocks {
-		if b.PDFRegion == nil || b.PDFRegion.Page != page {
-			continue
-		}
-		if b.PDFRegion.W <= 0 {
-			continue
-		}
-		widths = append(widths, b.PDFRegion.W)
 	}
 
 	isMulti := false

@@ -64,15 +64,28 @@ func (m Model) startSearch() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// restoreSearchOrigin puts the cursor back where / was pressed. snapCursor
+// re-derives the pair from the visible targets and rewrites the in-block line
+// with that target's anchor, so the saved line has to be reinstated after it —
+// otherwise backing out of a search silently moves the reader to the top of
+// the hunk instead of the line they were on.
+func (m *Model) restoreSearchOrigin(s *searchState) {
+	m.Cursor = s.OriginCursor
+	m.SourceLineCursor = s.OriginLine
+	m.snapCursor()
+	if m.Cursor == s.OriginCursor {
+		m.SourceLineCursor = s.OriginLine
+		m.snapSourceLine()
+	}
+}
+
 // updateSearchInput consumes keys while the / query is being composed.
 func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := m.Search
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		// Undo any live incremental jump.
-		m.Cursor = s.OriginCursor
-		m.SourceLineCursor = s.OriginLine
-		m.snapCursor()
+		m.restoreSearchOrigin(s)
 		m.Search = nil
 		m.Status = "search cancelled"
 		return m.withPDFRender()
@@ -146,17 +159,13 @@ func (m Model) incrementalSearch() (tea.Model, tea.Cmd) {
 	s := m.Search
 	query := strings.TrimSpace(s.Input)
 	if query == "" {
-		m.Cursor = s.OriginCursor
-		m.SourceLineCursor = s.OriginLine
-		m.snapCursor()
+		m.restoreSearchOrigin(s)
 		m.Status = "/" + s.Input
 		return m.withPDFRender()
 	}
 	matches := m.searchMatches(query)
 	if len(matches) == 0 {
-		m.Cursor = s.OriginCursor
-		m.SourceLineCursor = s.OriginLine
-		m.snapCursor()
+		m.restoreSearchOrigin(s)
 		m.Status = fmt.Sprintf("/%s (no matches)", s.Input)
 		return m.withPDFRender()
 	}
@@ -489,14 +498,28 @@ func (m Model) jumpAnnotation(delta int) (tea.Model, tea.Cmd) {
 		m.Status = "no annotations yet — a annotates the current pair"
 		return m, nil
 	}
+	// Only pairs the filter actually shows are reachable: snapCursor re-derives
+	// the cursor from the visible targets, so jumping to a hidden pair would
+	// land somewhere else while the status line named the pair we meant.
 	var annotated []int
-	for i := range m.Review.Pairs {
-		if m.Annotations[m.Review.Pairs[i].ID] != "" {
-			annotated = append(annotated, i)
+	for _, idx := range m.visibleIndices() {
+		if idx >= 0 && idx < len(m.Review.Pairs) && m.Annotations[m.Review.Pairs[idx].ID] != "" {
+			annotated = append(annotated, idx)
 		}
 	}
 	if len(annotated) == 0 {
-		m.Status = "no annotations yet — a annotates the current pair"
+		hidden := 0
+		for i := range m.Review.Pairs {
+			if m.Annotations[m.Review.Pairs[i].ID] != "" {
+				hidden++
+			}
+		}
+		if hidden > 0 {
+			m.Status = fmt.Sprintf("%d annotated pair(s), all hidden by filter:%s (press f to widen)",
+				hidden, m.Filter.String())
+		} else {
+			m.Status = "no annotations yet — a annotates the current pair"
+		}
 		return m, nil
 	}
 	target := -1

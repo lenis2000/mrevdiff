@@ -197,6 +197,7 @@ func (m Model) applyOldPDF(msg diffOldPDFMsg) (Model, tea.Cmd) {
 	m.oldPDFState = oldPDFReady
 	if m.Review != nil {
 		populateDocPDFRegions(m.Review.OldDoc, msg.Index)
+		m.pageLayout.SetDocRegions(m.Review.OldDoc)
 	}
 	m.pdfSide = pdfSideOld
 	m.Status = msg.Status

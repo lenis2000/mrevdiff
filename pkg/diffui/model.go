@@ -225,6 +225,12 @@ type Model struct {
 	PDFStatus      string
 	pdfGen         int
 	pdfReloadGen   int
+	// buildInFlight guards against mrevdiff racing its own latexmk: a reload
+	// requested while the background build runs would collide on our own
+	// lmk-guard lock. buildQueued remembers that another pass is wanted, so a
+	// rebuild asked for mid-build (after an edit) still runs afterwards.
+	buildInFlight  bool
+	buildQueued    bool
 	KittyAvailable bool
 	// lastKittyID is the image id of the frame currently painted in the
 	// PDF pane; the next frame deletes it *after* drawing (flicker-free
@@ -283,6 +289,12 @@ type Model struct {
 	// it was when the session started. In-place e/E file edits are NOT
 	// rolled back — they were written to the .tex at submit time.
 	Discarded bool
+	// sidecarOrigin is the sidecar exactly as the review found it, kept so a
+	// Q-discard can undo an O flush. Without it, "discard" silently left the
+	// annotations O had already written on disk, which is the opposite of
+	// what Q promises.
+	sidecarOrigin  *diffreview.Sidecar
+	sidecarFlushed bool
 	// discardArmed is true after the first Q press; any other key or
 	// mouse event disarms.
 	discardArmed bool
@@ -353,6 +365,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		Styles:             opts.Styles,
 		Sidecar:            side,
 		SidecarBase:        diffreview.CloneSidecar(sidecarBase),
+		sidecarOrigin:      diffreview.CloneSidecar(sidecarBase),
 		Reviewed:           reviewed,
 		Annotations:        annotations,
 		Issues:             copyIssueMap(opts.Issues),
@@ -386,6 +399,11 @@ func New(review *diffreview.Review, opts Options) Model {
 		m.Keymap = NewKeymap()
 	}
 	resetRenderMemos()
+	// ResolveStartupPDF has already mapped the new doc's regions; snapshot them
+	// so the render goroutines never read the blocks directly.
+	if review != nil {
+		m.pageLayout.SetDocRegions(review.NewDoc)
+	}
 	if side.CursorPairID != "" {
 		if idx := pairIndexByID(review, side.CursorPairID); idx >= 0 {
 			m.Cursor = idx
@@ -470,11 +488,23 @@ func (m Model) flushSidecar() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.SidecarBase = diffreview.CloneSidecar(final)
+	m.sidecarFlushed = true
 	if st, err := os.Stat(m.SidecarPath); err == nil {
 		m.SidecarMTime = st.ModTime()
 	}
 	m.Status = "annotations written to " + filepath.Base(m.SidecarPath)
 	return m, nil
+}
+
+// RestoreSidecarOnDiscard undoes an O flush when the session ends in a
+// Q-discard: O writes this session's annotations to disk mid-review, so
+// without this "discard" would leave exactly the annotations it promised to
+// throw away. No-op when nothing was ever flushed.
+func (m Model) RestoreSidecarOnDiscard() error {
+	if !m.sidecarFlushed || m.SidecarPath == "" {
+		return nil
+	}
+	return diffreview.SaveSidecar(m.SidecarPath, m.sidecarOrigin)
 }
 
 // CurrentPair returns the selected semantic pair.

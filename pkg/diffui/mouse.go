@@ -40,9 +40,11 @@ func (m Model) ShouldDropMouseWheel(msg tea.MouseMsg) bool {
 		edge.SourceLineCursor == m.SourceLineCursor
 }
 
-// handleMouse maps mouse wheel events to the pane under the pointer. Outline
-// and PDF wheel move between semantic pairs; old/new source wheel scrolls only
-// within the selected pair. Left clicks only update focus for now.
+// handleMouse maps mouse events to the pane under the pointer. Outline and PDF
+// wheel move between semantic pairs; old/new source wheel scrolls only within
+// the selected pair. A left click focuses the pane and jumps to the row under
+// the pointer. Callers must have ruled out modalActive() first: the hit test
+// reads m.Layout, which describes the panes an overlay is currently hiding.
 func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	if m.Width <= 0 || m.Height <= 0 {
 		return m, nil
@@ -286,12 +288,8 @@ func (m Model) clickSourceLine(pane Pane, x, y int) (Model, bool) {
 	// Content rows start below the pane border and title line.
 	const rowsTop = 2
 	rowInView := y - rowsTop
-	// The renderer computes its scroll window with paneHeight-2 lines and
-	// the pane displays one fewer (border+title+border eat three rows);
-	// mapping must use the renderer's window height or the two drift at
-	// the bottom of a long block.
-	windowH := geo.height - 2
-	if rowInView < 0 || rowInView >= geo.height-3 {
+	windowH := sourceBodyRows(geo.height)
+	if rowInView < 0 || rowInView >= windowH {
 		return m, false
 	}
 	pair := m.CurrentDisplayPair()

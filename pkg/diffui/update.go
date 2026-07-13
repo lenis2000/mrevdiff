@@ -68,7 +68,7 @@ func (m Model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mouse handlers overwrite the status line, so leaving the flag
 		// armed would let a much-later Q discard without a visible warning.
 		m.discardArmed = false
-		if m.LineEdit != nil || m.Popup != nil {
+		if m.modalActive() {
 			return m, nil
 		}
 		return m.handleMouse(msg)
@@ -83,6 +83,23 @@ func (m Model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+// modalActive reports whether something is claiming input ahead of the panes:
+// the full-screen overlays (help, info, palette, annotation list) do not even
+// draw the panes, and the line editor, annotation popup, / prompt and pending
+// confirmation all own the keyboard. The mouse must honour the same set —
+// otherwise a click is mapped through a layout that is not on screen, and
+// click-to-jump silently moves the cursor or folds a group behind the overlay.
+func (m Model) modalActive() bool {
+	return m.LineEdit != nil ||
+		m.Popup != nil ||
+		m.Palette != nil ||
+		m.AnnList != nil ||
+		m.Pending != nil ||
+		m.ShowHelp ||
+		m.ShowInfo ||
+		(m.Search != nil && m.Search.Typing)
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

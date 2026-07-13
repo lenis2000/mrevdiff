@@ -289,6 +289,11 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	waitRenders = model.WaitPDFRenders
 
 	final, err := runDiffTUI(model, stdout, stderr)
+	// Bubble Tea abandons in-flight Cmds on quit, so a background build is
+	// still running here: kill its latexmk and drop the lmk-guard lock before
+	// the process exits, or we orphan the compile and leave the lock behind
+	// holding a dead pid for the next lmk/lmkf to reap and race.
+	diffui.StopBuild()
 	// A stale agterm flag must never outlive the review and point at a
 	// plain shell; clearing is a no-op outside agterm.
 	diffui.AgtermClearFlag()
@@ -300,18 +305,26 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	finalSidecarBase := sidecarBase
 	finalReview := review
 	discarded := false
+	restoreSidecar := func() error { return nil }
 	if fm, ok := final.(diffui.Model); ok {
 		finalSidecar = fm.FinalSidecar()
 		finalSidecarBase = fm.SidecarBase
 		finalReview = fm.Review
 		finalPDF = fm.PDF
 		discarded = fm.Discarded
+		restoreSidecar = fm.RestoreSidecarOnDiscard
 		if fm.OldPDF != nil {
 			_ = fm.OldPDF.Close()
 		}
 	}
 	if discarded {
-		// Q-discard: leave the on-disk sidecar untouched and emit nothing.
+		// Q-discard: emit nothing, and leave the on-disk sidecar as the review
+		// found it — which means rolling back an O flush, since O already wrote
+		// this session's annotations out.
+		if err := restoreSidecar(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "mrevdiff: restore sidecar %q: %v\n", sidecarPath, err)
+			return 1
+		}
 		return 0
 	}
 	// A failed sidecar save must NOT gate the history net or the stdout
