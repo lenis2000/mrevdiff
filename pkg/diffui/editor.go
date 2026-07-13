@@ -286,11 +286,12 @@ func (m Model) reloadAfterEdit(status string) Model {
 	oldEndpoint := m.Review.Old
 	newEndpoint := m.Review.New
 	newEndpoint.Source = newSource
-	review, err := diffreview.BuildReview(oldEndpoint, newEndpoint)
+	review, err := diffreview.RebuildWithOldDoc(m.Review.OldDoc, oldEndpoint, newEndpoint)
 	if err != nil {
 		m.Status = "reload: " + err.Error()
 		return m
 	}
+	resetRenderMemos()
 	side := diffreview.RemapSidecar(m.FinalSidecar(), review)
 	sidecarBase := diffreview.RemapSidecar(m.SidecarBase, review)
 	m.Review = review

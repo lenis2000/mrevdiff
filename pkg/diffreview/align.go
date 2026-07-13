@@ -95,6 +95,21 @@ func BuildReview(oldEndpoint, newEndpoint Endpoint) (*Review, error) {
 	return AlignDocuments(oldEndpoint, newEndpoint, oldDoc, newDoc), nil
 }
 
+// RebuildWithOldDoc re-aligns after a new-side edit, reusing the old
+// endpoint's already parsed document — only the new file's bytes can
+// have changed, so re-parsing the old side is pure waste on every edit.
+func RebuildWithOldDoc(oldDoc *parser.Document, oldEndpoint, newEndpoint Endpoint) (*Review, error) {
+	if oldDoc == nil {
+		return BuildReview(oldEndpoint, newEndpoint)
+	}
+	newDoc, err := parser.Parse(newEndpoint.Source)
+	if err != nil {
+		return nil, fmt.Errorf("parse new endpoint: %w", err)
+	}
+	applyEndpointFile(newDoc, newEndpoint)
+	return AlignDocuments(oldEndpoint, newEndpoint, oldDoc, newDoc), nil
+}
+
 // AlignDocuments aligns two already parsed documents.
 func AlignDocuments(oldEndpoint, newEndpoint Endpoint, oldDoc, newDoc *parser.Document) *Review {
 	oldBlocks := reviewBlocks(oldDoc)

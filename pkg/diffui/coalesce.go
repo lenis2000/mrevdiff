@@ -144,10 +144,7 @@ func sourceLineRange(source []byte, startLine, endLine int) string {
 	if startLine < 1 || endLine < startLine || len(source) == 0 {
 		return ""
 	}
-	lines := strings.Split(string(source), "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+	lines := memoizedSplitLines(source)
 	if startLine > len(lines) {
 		return ""
 	}

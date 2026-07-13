@@ -376,6 +376,7 @@ func New(review *diffreview.Review, opts Options) Model {
 	if m.Keymap == nil {
 		m.Keymap = NewKeymap()
 	}
+	resetRenderMemos()
 	if side.CursorPairID != "" {
 		if idx := pairIndexByID(review, side.CursorPairID); idx >= 0 {
 			m.Cursor = idx

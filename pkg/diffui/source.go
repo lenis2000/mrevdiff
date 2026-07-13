@@ -78,7 +78,7 @@ func renderPairSource(pair *diffreview.Pair, width, height, oldAnchorLine, newAn
 	if height < 1 {
 		height = 1
 	}
-	rows := sourceRows(pair)
+	rows := memoizedSourceRows(pair)
 	if len(rows) == 0 {
 		return "(no source)"
 	}
@@ -147,7 +147,7 @@ func renderPairSourceSide(pair *diffreview.Pair, oldSide bool, width, height, ol
 	if height < 1 {
 		height = 1
 	}
-	rows := compactSourceRowsForSide(sourceRows(pair), oldSide)
+	rows := compactSourceRowsForSide(memoizedSourceRows(pair), oldSide)
 	if len(rows) == 0 {
 		return "(no source)"
 	}
@@ -622,7 +622,7 @@ func diffHunkInfos(pair *diffreview.Pair) []diffHunkInfo {
 	if pair == nil {
 		return nil
 	}
-	rows := sourceRows(pair)
+	rows := memoizedSourceRows(pair)
 	infos := make([]diffHunkInfo, 0, 4)
 	inChangedGroup := false
 	for _, row := range rows {
