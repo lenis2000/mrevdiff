@@ -90,6 +90,12 @@ type diffPDFRenderInputs struct {
 	// regardless of which page the current pair's region is on (the arrows
 	// flip through pages). 0 means "the current pair's page".
 	PageOverride int
+	// Region is the block's already-resolved SyncTeX region (nil when the
+	// block has none). RegionKnown distinguishes "resolved to nothing"
+	// from "not resolved" so the render goroutine skips re-querying the
+	// index for the frame the UI thread just resolved.
+	Region      *synctex.Region
+	RegionKnown bool
 }
 
 // ResolveStartupPDF opens whatever build artifacts already exist for the
@@ -364,16 +370,18 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
-	// Resolve the current pair's page (cheap map lookup; the frame render
-	// resolves it again but this keeps the view pure).
+	// Resolve the region once here (UI thread); the render goroutine
+	// reuses it via inputs instead of querying the index again per frame.
+	var region *synctex.Region
 	m.pdfPageShown = 0
 	if block.StartLine >= 1 {
 		file := block.File
 		if file == "" && doc != nil {
 			file = doc.File
 		}
-		if r := regionForBlockLines(idx, file, block.StartLine, block.EndLine); r != nil {
-			m.pdfPageShown = r.Page
+		region = regionForBlockLines(idx, file, block.StartLine, block.EndLine)
+		if region != nil {
+			m.pdfPageShown = region.Page
 		}
 	}
 	pageOverride := 0
@@ -422,6 +430,8 @@ func (m *Model) schedulePDFRender() tea.Cmd {
 		SideKey:      sideKey,
 		FullPage:     m.pdfFullPage,
 		PageOverride: pageOverride,
+		Region:       region,
+		RegionKnown:  true,
 	}
 	key := diffPDFRenderKey(sideKey, block, m.pdfReloadGen, w, h, cellW, cellH, pageOverride)
 	// Neighbor prefetch warms adjacent pairs' region crops; in full-page

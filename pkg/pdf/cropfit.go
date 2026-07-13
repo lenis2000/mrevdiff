@@ -133,12 +133,15 @@ func SuggestDPI(cropWPt, cropHPt float64, paneWPx, paneHPx int) float64 {
 // Column awareness is delegated to the caller via MultiColumn — page-
 // level layout detection (e.g. median region width) belongs in the UI
 // layer that owns the doc/synctex pair.
-func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
+//
+// The returned pxW/pxH are the PNG's pixel dimensions, so callers can do
+// the kitty aspect-fit math without decoding the PNG they just encoded.
+func CropFitted(d *Doc, r synctex.Region, opts FitOptions) (png []byte, pxW, pxH int, err error) {
 	if d == nil {
-		return nil, fmt.Errorf("pdf: nil doc")
+		return nil, 0, 0, fmt.Errorf("pdf: nil doc")
 	}
 	if !HasExtent(r) {
-		return nil, fmt.Errorf("pdf: region has zero extent")
+		return nil, 0, 0, fmt.Errorf("pdf: region has zero extent")
 	}
 	if opts.VpadPt <= 0 {
 		opts.VpadPt = fitVpadDefault
@@ -156,12 +159,12 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	// Page bounds in points (= big points; PDF user space).
 	bounds, err := d.Bounds(r.Page - 1)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	pageWPt := float64(bounds.Dx())
 	pageHPt := float64(bounds.Dy())
 	if pageWPt < 1 || pageHPt < 1 {
-		return nil, fmt.Errorf("pdf: page %d has zero bounds", r.Page)
+		return nil, 0, 0, fmt.Errorf("pdf: page %d has zero bounds", r.Page)
 	}
 
 	// Horizontal extent in points: full page or column slice.
@@ -178,7 +181,7 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	}
 	cropWPt := cropX1Pt - cropX0Pt
 	if cropWPt < 1 {
-		return nil, fmt.Errorf("pdf: degenerate horizontal crop (%.2f pt)", cropWPt)
+		return nil, 0, 0, fmt.Errorf("pdf: degenerate horizontal crop (%.2f pt)", cropWPt)
 	}
 
 	// Adaptive vpad — single-column crops grow vertical context so the
@@ -232,7 +235,7 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	}
 	cropHPt := cropY1Pt - cropY0Pt
 	if cropHPt < 1 {
-		return nil, fmt.Errorf("pdf: degenerate vertical crop (%.2f pt)", cropHPt)
+		return nil, 0, 0, fmt.Errorf("pdf: degenerate vertical crop (%.2f pt)", cropHPt)
 	}
 
 	// Choose render DPI for pane size. On logical-pixel terminals
@@ -243,6 +246,17 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	if opts.PaneWidthPx > 0 && opts.PaneHeightPx > 0 {
 		dpi = SuggestDPI(cropWPt, cropHPt, opts.PaneWidthPx, opts.PaneHeightPx)
 	}
+	// Quantize to a two-tier ladder. The crop height feeding SuggestDPI
+	// varies per block (adaptive vpad), so without this every block on a
+	// page would render the page at its own DPI and the page pixmap LRU
+	// would fill with near-duplicate renders. Rounding up to a shared
+	// tier lets all blocks on a page reuse one pixmap; kitty downscales
+	// the slightly-oversized crop without visible cost.
+	if dpi <= 150 {
+		dpi = 150
+	} else {
+		dpi = fitMaxDPI
+	}
 	if ss := SuperSampleFactor(); ss > 1 {
 		dpi *= ss
 		if dpi > fitMaxDPISupersampled {
@@ -252,7 +266,7 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 
 	img, err := d.Page(r.Page-1, dpi)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	imgBounds := img.Bounds()
 	scale := dpi / 72.0
@@ -276,10 +290,11 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 		py1 = imgBounds.Max.Y
 	}
 	if px1 <= px0 || py1 <= py0 {
-		return nil, fmt.Errorf("pdf: degenerate pixel crop after clamp")
+		return nil, 0, 0, fmt.Errorf("pdf: degenerate pixel crop after clamp")
 	}
 
 	cropped := subImage(img, image.Rect(px0, py0, px1, py1))
+	pxW, pxH = px1-px0, py1-py0
 	if opts.MarkRegion {
 		// The region rect in the same pixel space as the (sub)image.
 		regionRect := image.Rect(
@@ -292,9 +307,9 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	if err := fastPNG.Encode(&buf, cropped); err != nil {
-		return nil, fmt.Errorf("pdf: encode png: %w", err)
+		return nil, 0, 0, fmt.Errorf("pdf: encode png: %w", err)
 	}
-	return buf.Bytes(), nil
+	return buf.Bytes(), pxW, pxH, nil
 }
 
 // RenderPageFitted renders the whole page at the DPI that fits it into the
@@ -303,21 +318,24 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) ([]byte, error) {
 // are all visible — so it backs the full-page preview toggle. r only
 // positions the marker; a zero-extent or off-page r renders the page
 // unmarked.
-func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) ([]byte, error) {
+//
+// The returned pxW/pxH are the PNG's pixel dimensions, so callers can do
+// the kitty aspect-fit math without decoding the PNG they just encoded.
+func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) (png []byte, pxW, pxH int, err error) {
 	if d == nil {
-		return nil, fmt.Errorf("pdf: nil doc")
+		return nil, 0, 0, fmt.Errorf("pdf: nil doc")
 	}
 	if page < 1 {
-		return nil, fmt.Errorf("pdf: page must be positive (got %d)", page)
+		return nil, 0, 0, fmt.Errorf("pdf: page must be positive (got %d)", page)
 	}
 	bounds, err := d.Bounds(page - 1)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	pageWPt := float64(bounds.Dx())
 	pageHPt := float64(bounds.Dy())
 	if pageWPt < 1 || pageHPt < 1 {
-		return nil, fmt.Errorf("pdf: page %d has zero bounds", page)
+		return nil, 0, 0, fmt.Errorf("pdf: page %d has zero bounds", page)
 	}
 
 	dpi := DefaultCropDPI
@@ -333,9 +351,10 @@ func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) ([]by
 
 	img, err := d.Page(page-1, dpi)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	scale := dpi / 72.0
+	pxW, pxH = img.Bounds().Dx(), img.Bounds().Dy()
 
 	var out image.Image = img
 	if opts.MarkRegion && HasExtent(r) && r.Page == page {
@@ -350,9 +369,9 @@ func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) ([]by
 	}
 	var buf bytes.Buffer
 	if err := fastPNG.Encode(&buf, out); err != nil {
-		return nil, fmt.Errorf("pdf: encode png: %w", err)
+		return nil, 0, 0, fmt.Errorf("pdf: encode png: %w", err)
 	}
-	return buf.Bytes(), nil
+	return buf.Bytes(), pxW, pxH, nil
 }
 
 // markRegionColor is the marker ink: amber, readable on both the white

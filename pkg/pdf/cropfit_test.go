@@ -85,7 +85,7 @@ func TestCropFitted_ProducesDecodablePNGAtAdaptiveDPI(t *testing.T) {
 		W:    float64(bounds.Dx()) / 4,
 		H:    float64(bounds.Dy()) / 4,
 	}
-	pngBytes, err := CropFitted(d, r, FitOptions{
+	pngBytes, _, _, err := CropFitted(d, r, FitOptions{
 		PaneWidthPx:  800,
 		PaneHeightPx: 600,
 	})
@@ -114,10 +114,10 @@ func TestCropFitted_MultiColumnVpadStaysTight(t *testing.T) {
 	// growing vertically inside a narrow column pulls in unrelated
 	// material from the same column above/below the block.
 	opts := FitOptions{PaneWidthPx: 300, PaneHeightPx: 1800, MultiColumn: true}
-	tall, err := CropFitted(d, r, opts)
+	tall, _, _, err := CropFitted(d, r, opts)
 	require.NoError(t, err)
 	opts.PaneHeightPx = 200
-	short, err := CropFitted(d, r, opts)
+	short, _, _, err := CropFitted(d, r, opts)
 	require.NoError(t, err)
 	tallImg, err := png.Decode(bytes.NewReader(tall))
 	require.NoError(t, err)
@@ -156,9 +156,9 @@ func TestCropFitted_SingleColumnVpadAdaptsToPaneAspect(t *testing.T) {
 	// aspect — short-aspect panes pull in more vertical context, tall-
 	// aspect panes stay tight. Without this the crop letterboxes to a
 	// thin strip at the top of the pane.
-	wide, err := CropFitted(d, r, FitOptions{PaneWidthPx: 1800, PaneHeightPx: 1200})
+	wide, _, _, err := CropFitted(d, r, FitOptions{PaneWidthPx: 1800, PaneHeightPx: 1200})
 	require.NoError(t, err)
-	tall, err := CropFitted(d, r, FitOptions{PaneWidthPx: 1800, PaneHeightPx: 200})
+	tall, _, _, err := CropFitted(d, r, FitOptions{PaneWidthPx: 1800, PaneHeightPx: 200})
 	require.NoError(t, err)
 	wideImg, err := png.Decode(bytes.NewReader(wide))
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ func TestCropFitted_SmallRegionStaysFocused(t *testing.T) {
 	}
 	// Tall narrow pane — exactly the layout that previously inflated a
 	// small region's crop to ~70 % of the page.
-	pngBytes, err := CropFitted(d, r, FitOptions{PaneWidthPx: 800, PaneHeightPx: 1600})
+	pngBytes, _, _, err := CropFitted(d, r, FitOptions{PaneWidthPx: 800, PaneHeightPx: 1600})
 	require.NoError(t, err)
 	img, err := png.Decode(bytes.NewReader(pngBytes))
 	require.NoError(t, err)
@@ -223,13 +223,13 @@ func TestCropFitted_ColumnModeNarrowsHorizontally(t *testing.T) {
 		W:    float64(bounds.Dx()) / 4, // narrow region
 		H:    float64(bounds.Dy()) / 4,
 	}
-	full, err := CropFitted(d, r, FitOptions{
+	full, _, _, err := CropFitted(d, r, FitOptions{
 		PaneWidthPx:  800,
 		PaneHeightPx: 600,
 		MultiColumn:  false,
 	})
 	require.NoError(t, err)
-	col, err := CropFitted(d, r, FitOptions{
+	col, _, _, err := CropFitted(d, r, FitOptions{
 		PaneWidthPx:  800,
 		PaneHeightPx: 600,
 		MultiColumn:  true,
@@ -274,9 +274,9 @@ func TestCropFitted_RebalancesClampedTopEdge(t *testing.T) {
 	}
 
 	opts := FitOptions{PaneWidthPx: 600, PaneHeightPx: 600}
-	top, err := CropFitted(d, rTop, opts)
+	top, _, _, err := CropFitted(d, rTop, opts)
 	require.NoError(t, err)
-	mid, err := CropFitted(d, rMid, opts)
+	mid, _, _, err := CropFitted(d, rMid, opts)
 	require.NoError(t, err)
 
 	topImg, err := png.Decode(bytes.NewReader(top))
@@ -296,9 +296,29 @@ func TestCropFitted_DegenerateInputsErrorEarly(t *testing.T) {
 	d := openFixture(t)
 	defer func() { _ = d.Close() }()
 
-	_, err := CropFitted(nil, synctex.Region{Page: 1, W: 10, H: 10}, FitOptions{})
+	_, _, _, err := CropFitted(nil, synctex.Region{Page: 1, W: 10, H: 10}, FitOptions{})
 	assert.Error(t, err, "nil doc")
 
-	_, err = CropFitted(d, synctex.Region{Page: 1}, FitOptions{})
+	_, _, _, err = CropFitted(d, synctex.Region{Page: 1}, FitOptions{})
 	assert.Error(t, err, "zero extent")
+}
+
+// TestCropFittedSharesPagePixmapAcrossRegions pins the DPI ladder: blocks
+// of different heights on the same page must not each raster the page at
+// their own DPI (the adaptive vpad used to vary SuggestDPI per block,
+// filling the LRU with near-duplicate pixmaps).
+func TestCropFittedSharesPagePixmapAcrossRegions(t *testing.T) {
+	d := openFixture(t)
+	defer func() { _ = d.Close() }()
+
+	opts := FitOptions{PaneWidthPx: 900, PaneHeightPx: 1100}
+	short := synctex.Region{Page: 1, X: 100, Y: 150, W: 300, H: 20}
+	tall := synctex.Region{Page: 1, X: 100, Y: 300, W: 300, H: 240}
+
+	_, _, _, err := CropFitted(d, short, opts)
+	require.NoError(t, err)
+	_, _, _, err = CropFitted(d, tall, opts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, d.CacheLen(),
+		"different-height regions on one page must share a single pixmap")
 }

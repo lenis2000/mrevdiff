@@ -8,6 +8,7 @@ import (
 	_ "image/png"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -115,11 +116,42 @@ func DetectCellPixelSize() (float64, float64) {
 	return detectCellPixelSize()
 }
 
-// detectCellPixelSize returns the pixel dimensions of one terminal cell.
-// Tries TIOCGWINSZ first; falls back to typical kitty defaults if the kernel
-// doesn't report pixel sizes (some non-kitty terminals leave Xpixel/Ypixel
-// zeroed even though they support kitty graphics via passthrough).
+// cellSizeCache avoids re-issuing the TIOCGWINSZ ioctl (and the /dev/tty
+// fallback open) on every frame render and prefetch — the value only
+// changes on a resize or font change, both of which surface as a
+// tea.WindowSizeMsg that calls InvalidateCellPixelSize.
+var cellSizeCache struct {
+	mu    sync.Mutex
+	valid bool
+	w, h  float64
+}
+
+// InvalidateCellPixelSize drops the cached cell size so the next detection
+// re-queries the terminal. Call on terminal resize.
+func InvalidateCellPixelSize() {
+	cellSizeCache.mu.Lock()
+	cellSizeCache.valid = false
+	cellSizeCache.mu.Unlock()
+}
+
+// detectCellPixelSize returns the pixel dimensions of one terminal cell,
+// cached until InvalidateCellPixelSize.
 func detectCellPixelSize() (float64, float64) {
+	cellSizeCache.mu.Lock()
+	defer cellSizeCache.mu.Unlock()
+	if !cellSizeCache.valid {
+		cellSizeCache.w, cellSizeCache.h = detectCellPixelSizeUncached()
+		cellSizeCache.valid = true
+	}
+	return cellSizeCache.w, cellSizeCache.h
+}
+
+// detectCellPixelSizeUncached queries the terminal for one cell's pixel
+// dimensions. Tries TIOCGWINSZ first; falls back to typical kitty defaults
+// if the kernel doesn't report pixel sizes (some non-kitty terminals leave
+// Xpixel/Ypixel zeroed even though they support kitty graphics via
+// passthrough).
+func detectCellPixelSizeUncached() (float64, float64) {
 	pixW, pixH := terminalPixelSize()
 	colW, rowH := terminalCellSize()
 	if pixW > 0 && pixH > 0 && colW > 0 && rowH > 0 {

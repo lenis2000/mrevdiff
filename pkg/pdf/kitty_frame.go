@@ -79,8 +79,15 @@ func kittyFitCells(pngBytes []byte, widthCells, heightCells int) (int, int, erro
 		return 0, 0, fmt.Errorf("pdf: decode png: %w", err)
 	}
 	bounds := img.Bounds()
-	imgPxW := float64(bounds.Dx())
-	imgPxH := float64(bounds.Dy())
+	return kittyFitCellsSized(bounds.Dx(), bounds.Dy(), widthCells, heightCells)
+}
+
+// kittyFitCellsSized is kittyFitCells for callers that already know the
+// image's pixel dimensions (CropFitted/RenderPageFitted return them), so
+// the interactive path never decodes the PNG it just encoded.
+func kittyFitCellsSized(pxW, pxH, widthCells, heightCells int) (int, int, error) {
+	imgPxW := float64(pxW)
+	imgPxH := float64(pxH)
 	if imgPxW < 1 || imgPxH < 1 {
 		return 0, 0, fmt.Errorf("pdf: image has zero extent")
 	}
@@ -124,6 +131,16 @@ func kittyFitCells(pngBytes []byte, widthCells, heightCells int) (int, int, erro
 // its lifecycle (mrevdiff keys files to its render cache and deletes them on
 // eviction or exit).
 func RenderKittyFrame(pngBytes []byte, widthCells, heightCells int, id uint32, transferPath string) (string, error) {
+	return renderKittyFrame(pngBytes, 0, 0, widthCells, heightCells, id, transferPath)
+}
+
+// RenderKittyFrameSized is RenderKittyFrame for callers that already know
+// the PNG's pixel dimensions, skipping the decode-for-dims round trip.
+func RenderKittyFrameSized(pngBytes []byte, pxW, pxH, widthCells, heightCells int, id uint32, transferPath string) (string, error) {
+	return renderKittyFrame(pngBytes, pxW, pxH, widthCells, heightCells, id, transferPath)
+}
+
+func renderKittyFrame(pngBytes []byte, pxW, pxH, widthCells, heightCells int, id uint32, transferPath string) (string, error) {
 	if len(pngBytes) == 0 {
 		return "", fmt.Errorf("pdf: empty png bytes")
 	}
@@ -133,7 +150,13 @@ func RenderKittyFrame(pngBytes []byte, widthCells, heightCells int, id uint32, t
 	if id == 0 {
 		return "", fmt.Errorf("pdf: image id must be non-zero")
 	}
-	fitW, fitH, err := kittyFitCells(pngBytes, widthCells, heightCells)
+	var fitW, fitH int
+	var err error
+	if pxW > 0 && pxH > 0 {
+		fitW, fitH, err = kittyFitCellsSized(pxW, pxH, widthCells, heightCells)
+	} else {
+		fitW, fitH, err = kittyFitCells(pngBytes, widthCells, heightCells)
+	}
 	if err != nil {
 		return "", err
 	}

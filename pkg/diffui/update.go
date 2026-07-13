@@ -9,6 +9,7 @@ import (
 
 	"github.com/lenis2000/mrevdiff/pkg/diffreview"
 	"github.com/lenis2000/mrevdiff/pkg/parser"
+	"github.com/lenis2000/mrevdiff/pkg/pdf"
 )
 
 const (
@@ -40,6 +41,9 @@ func (m Model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		// Cell pixel size changes exactly when the window geometry does
+		// (resize or font change); everything else reads the cached value.
+		pdf.InvalidateCellPixelSize()
 		return m.withPDFRender()
 	case diffEditFinishedMsg:
 		return m.applyEditFinished(msg)

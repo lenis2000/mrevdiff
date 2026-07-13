@@ -42,6 +42,12 @@ type Index struct {
 	// Lines maps cleaned file path -> source line number -> all regions
 	// produced by records on that line.
 	Lines map[string]map[int][]Region
+	// sortedLines holds each file's mapped line numbers in ascending
+	// order, built once at parse time so RegionForLines can binary-search
+	// a [start,end] range instead of sweeping the whole per-file map on
+	// every cursor move. May be nil for hand-built indexes; lookups then
+	// fall back to the full sweep.
+	sortedLines map[string][]int
 
 	unit, xOff, yOff int64
 	mag              int64
@@ -140,10 +146,23 @@ func Parse(r io.Reader) (*Index, error) {
 		}
 		m[rec.line] = append(m[rec.line], reg)
 	}
+	idx.buildSortedLines()
 	if err := sc.Err(); err != nil {
 		return idx, err
 	}
 	return idx, nil
+}
+
+func (idx *Index) buildSortedLines() {
+	idx.sortedLines = make(map[string][]int, len(idx.Lines))
+	for file, m := range idx.Lines {
+		keys := make([]int, 0, len(m))
+		for ln := range m {
+			keys = append(keys, ln)
+		}
+		sort.Ints(keys)
+		idx.sortedLines[file] = keys
+	}
 }
 
 // handleHeader consumes a key:value preamble line. Returns true if the line
@@ -303,17 +322,26 @@ func (idx *Index) toRegion(page int, r rawRec) Region {
 // line falls in [start, end] on the first page that contains any such record.
 // nil if the file is unknown or no lines matched.
 func (idx *Index) RegionForLines(file string, start, end int) *Region {
-	lines := idx.linesFor(file)
+	key, lines := idx.linesEntryFor(file)
 	if lines == nil {
 		return nil
 	}
 	byPage := map[int][]Region{}
-	for ln, regs := range lines {
-		if ln < start || ln > end {
-			continue
+	if keys, ok := idx.sortedLines[key]; ok {
+		lo := sort.SearchInts(keys, start)
+		for i := lo; i < len(keys) && keys[i] <= end; i++ {
+			for _, r := range lines[keys[i]] {
+				byPage[r.Page] = append(byPage[r.Page], r)
+			}
 		}
-		for _, r := range regs {
-			byPage[r.Page] = append(byPage[r.Page], r)
+	} else {
+		for ln, regs := range lines {
+			if ln < start || ln > end {
+				continue
+			}
+			for _, r := range regs {
+				byPage[r.Page] = append(byPage[r.Page], r)
+			}
 		}
 	}
 	if len(byPage) == 0 {
@@ -357,9 +385,16 @@ func (idx *Index) RegionForLines(file string, start, end int) *Region {
 // returns nil and the caller treats this as "no region" — better than
 // silently picking the wrong file based on Go's randomised map iteration.
 func (idx *Index) linesFor(file string) map[int][]Region {
+	_, m := idx.linesEntryFor(file)
+	return m
+}
+
+// linesEntryFor is linesFor plus the resolved map key, so callers can
+// reach the parallel sortedLines slice for the same file.
+func (idx *Index) linesEntryFor(file string) (string, map[int][]Region) {
 	clean := filepath.Clean(file)
 	if m, ok := idx.Lines[clean]; ok {
-		return m
+		return clean, m
 	}
 	bestKey, bestN, tied := "", 0, false
 	for k := range idx.Lines {
@@ -375,9 +410,9 @@ func (idx *Index) linesFor(file string) map[int][]Region {
 		}
 	}
 	if bestN == 0 || tied {
-		return nil
+		return "", nil
 	}
-	return idx.Lines[bestKey]
+	return bestKey, idx.Lines[bestKey]
 }
 
 // File returns the path recorded for a SyncTeX input tag, if any.

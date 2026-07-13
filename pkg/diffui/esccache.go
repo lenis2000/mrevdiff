@@ -302,11 +302,15 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 	if file == "" && in.Doc != nil {
 		file = in.Doc.File
 	}
-	region := regionForBlockLines(in.Index, file, in.Block.StartLine, in.Block.EndLine)
+	region := in.Region
+	if !in.RegionKnown {
+		region = regionForBlockLines(in.Index, file, in.Block.StartLine, in.Block.EndLine)
+	}
 	epoch := in.Cache.currentEpoch()
 	paneWPx := int(float64(in.WidthCells) * in.CellWidthPx)
 	paneHPx := int(float64(in.HeightCells) * in.CellHeightPx)
 	var png []byte
+	var pxW, pxH int
 	var err error
 	if in.FullPage {
 		// Whole page with the region marked (when the region is on this
@@ -324,7 +328,7 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		if page < 1 {
 			return "", 0, "", pdf.NoRegionPlaceholder
 		}
-		png, err = pdf.RenderPageFitted(in.PDF, page, mark, pdf.FitOptions{
+		png, pxW, pxH, err = pdf.RenderPageFitted(in.PDF, page, mark, pdf.FitOptions{
 			PaneWidthPx:  paneWPx,
 			PaneHeightPx: paneHPx,
 			MarkRegion:   true,
@@ -338,7 +342,7 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		// region's column instead. Page-level detection avoids misfiring on
 		// narrow inline equations in single-column papers.
 		multi := in.PageLayout.IsMultiColumn(in.PDF, in.Doc, region.Page)
-		png, err = pdf.CropFitted(in.PDF, *region, pdf.FitOptions{
+		png, pxW, pxH, err = pdf.CropFitted(in.PDF, *region, pdf.FitOptions{
 			PaneWidthPx:  paneWPx,
 			PaneHeightPx: paneHPx,
 			MultiColumn:  multi,
@@ -349,7 +353,7 @@ func renderDiffPDFFrame(in diffPDFRenderInputs, key string) (string, uint32, str
 		return "", 0, "", fmt.Sprintf("pdf: %v", err)
 	}
 	id := pdf.NextKittyImageID()
-	esc, err := pdf.RenderKittyFrame(png, in.WidthCells, in.HeightCells, id, transferPath)
+	esc, err := pdf.RenderKittyFrameSized(png, pxW, pxH, in.WidthCells, in.HeightCells, id, transferPath)
 	if err != nil {
 		return "", 0, "", fmt.Sprintf("pdf: %v", err)
 	}
@@ -371,6 +375,10 @@ func warmNeighborFrames(in diffPDFRenderInputs, neighbors []*parser.Block) {
 		}
 		nin := in
 		nin.Block = b
+		// The precomputed region belongs to the cursor block, not the
+		// neighbor; let the frame render resolve the neighbor's own.
+		nin.Region = nil
+		nin.RegionKnown = false
 		key := diffPDFRenderKey(in.SideKey, b, in.ReloadGen, in.WidthCells, in.HeightCells, in.CellWidthPx, in.CellHeightPx, 0)
 		if !nin.Cache.tryClaim(key) {
 			continue
