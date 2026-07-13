@@ -39,8 +39,6 @@ type sourceRow struct {
 	separator bool
 }
 
-const intralinePairThreshold = 0.40
-
 var (
 	diffDeleteLineStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("224")).Background(lipgloss.Color("52"))
 	diffAddLineStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("194")).Background(lipgloss.Color("22"))
@@ -756,111 +754,6 @@ func displayPairScore(oldLine, newLine, oldMark, newMark string, score float64) 
 	return 0, false
 }
 
-func alignReplaceLineBlock(oldBlock, newBlock *parser.Block, oldLines, newLines []string, oldStart, oldEnd, newStart, newEnd int) []sourceRow {
-	oldN := oldEnd - oldStart
-	newN := newEnd - newStart
-	if oldN == 0 && newN == 0 {
-		return nil
-	}
-	sim := make([][]float64, oldN)
-	for i := 0; i < oldN; i++ {
-		sim[i] = make([]float64, newN)
-		for j := 0; j < newN; j++ {
-			sim[i][j] = lineSimilarity(oldLines[oldStart+i], newLines[newStart+j])
-		}
-	}
-	dp := make([][]float64, oldN+1)
-	choice := make([][]byte, oldN+1)
-	for i := range dp {
-		dp[i] = make([]float64, newN+1)
-		choice[i] = make([]byte, newN+1)
-	}
-	for i := oldN; i >= 0; i-- {
-		for j := newN; j >= 0; j-- {
-			if i == oldN && j == newN {
-				continue
-			}
-			best := -1.0
-			if i < oldN {
-				best = dp[i+1][j]
-				choice[i][j] = 'd'
-			}
-			if j < newN && dp[i][j+1] > best {
-				best = dp[i][j+1]
-				choice[i][j] = 'i'
-			}
-			if i < oldN && j < newN && sim[i][j] >= intralinePairThreshold {
-				score := sim[i][j] + dp[i+1][j+1]
-				if score >= best {
-					best = score
-					choice[i][j] = 'p'
-				}
-			}
-			dp[i][j] = best
-		}
-	}
-	var rows []sourceRow
-	for i, j := 0, 0; i < oldN || j < newN; {
-		switch choice[i][j] {
-		case 'p':
-			oldText := oldLines[oldStart+i]
-			newText := newLines[newStart+j]
-			oldParts, newParts := intralineDiffParts(oldText, newText)
-			rows = append(rows, sourceRow{
-				oldMark:  "~",
-				oldLine:  sourceLineNumber(oldBlock, oldStart+i),
-				oldText:  oldText,
-				oldParts: oldParts,
-				newMark:  "~",
-				newLine:  sourceLineNumber(newBlock, newStart+j),
-				newText:  newText,
-				newParts: newParts,
-			})
-			i++
-			j++
-		case 'i':
-			rows = append(rows, sourceRow{
-				newMark: "+",
-				newLine: sourceLineNumber(newBlock, newStart+j),
-				newText: newLines[newStart+j],
-			})
-			j++
-		default:
-			rows = append(rows, sourceRow{
-				oldMark: "-",
-				oldLine: sourceLineNumber(oldBlock, oldStart+i),
-				oldText: oldLines[oldStart+i],
-			})
-			i++
-		}
-	}
-	return rows
-}
-
-func intralineDiffParts(oldLine, newLine string) ([]sourcePart, []sourcePart) {
-	oldTokens := tokenizeLatex(oldLine)
-	newTokens := tokenizeLatex(newLine)
-	matcher := difflib.NewMatcher(oldTokens, newTokens)
-	var oldParts, newParts []sourcePart
-	for _, op := range matcher.GetOpCodes() {
-		oldText := strings.Join(oldTokens[op.I1:op.I2], "")
-		newText := strings.Join(newTokens[op.J1:op.J2], "")
-		switch op.Tag {
-		case 'e':
-			oldParts = appendPart(oldParts, sourcePartEqual, oldText)
-			newParts = appendPart(newParts, sourcePartEqual, newText)
-		case 'd':
-			oldParts = appendPart(oldParts, sourcePartDelete, oldText)
-		case 'i':
-			newParts = appendPart(newParts, sourcePartAdd, newText)
-		case 'r':
-			oldParts = appendPart(oldParts, sourcePartChange, oldText)
-			newParts = appendPart(newParts, sourcePartChange, newText)
-		}
-	}
-	return oldParts, newParts
-}
-
 func appendPart(parts []sourcePart, kind sourcePartKind, text string) []sourcePart {
 	if text == "" {
 		return parts
@@ -870,52 +763,6 @@ func appendPart(parts []sourcePart, kind sourcePartKind, text string) []sourcePa
 		return parts
 	}
 	return append(parts, sourcePart{Text: text, Kind: kind})
-}
-
-func lineSimilarity(oldLine, newLine string) float64 {
-	oldTokens := visibleTokens(tokenizeLatex(oldLine))
-	newTokens := visibleTokens(tokenizeLatex(newLine))
-	if len(oldTokens) == 0 && len(newTokens) == 0 {
-		return 1
-	}
-	if len(oldTokens) == 0 || len(newTokens) == 0 {
-		return 0
-	}
-	lcs := lcsLength(oldTokens, newTokens)
-	return float64(2*lcs) / float64(len(oldTokens)+len(newTokens))
-}
-
-func visibleTokens(tokens []string) []string {
-	out := make([]string, 0, len(tokens))
-	for _, tok := range tokens {
-		if strings.TrimSpace(tok) == "" {
-			continue
-		}
-		out = append(out, strings.ToLower(tok))
-	}
-	return out
-}
-
-func lcsLength(a, b []string) int {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	dp := make([][]int, len(a)+1)
-	for i := range dp {
-		dp[i] = make([]int, len(b)+1)
-	}
-	for i := len(a) - 1; i >= 0; i-- {
-		for j := len(b) - 1; j >= 0; j-- {
-			if a[i] == b[j] {
-				dp[i][j] = 1 + dp[i+1][j+1]
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
-			}
-		}
-	}
-	return dp[0][0]
 }
 
 func tokenizeLatex(s string) []string {
