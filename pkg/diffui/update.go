@@ -47,6 +47,10 @@ func (m Model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyCompareFinished(msg)
 	case diffPDFRenderMsg:
 		return m.applyPDFRender(msg)
+	case diffStartupBuildMsg:
+		next, cmd := m.startPDFReload(true)
+		next.Status = "building new PDF in the background…"
+		return next, cmd
 	case diffPDFReloadMsg:
 		return m.applyPDFReload(msg)
 	case diffPDFOpenFinishedMsg:

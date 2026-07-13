@@ -1,10 +1,8 @@
 package diffui
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,10 +27,7 @@ const (
 // PDFOptions controls startup PDF preparation for diff mode.
 type PDFOptions struct {
 	NoBuild  bool
-	Draft    bool
 	BuildCmd string
-	Stderr   io.Writer
-	Ctx      context.Context
 }
 
 // PDFArtifacts contains the new-side PDF handles and startup status.
@@ -42,6 +37,9 @@ type PDFArtifacts struct {
 	Status     string
 	BuildStale bool
 	Result     *build.Result
+	// WantBuild asks the TUI to kick a background build (or lmkf wait)
+	// from Init: startup itself never blocks on latexmk.
+	WantBuild bool
 }
 
 type diffPDFRenderMsg struct {
@@ -51,6 +49,9 @@ type diffPDFRenderMsg struct {
 	XferPath   string
 	Status     string
 }
+
+// diffStartupBuildMsg kicks the deferred startup build from Init.
+type diffStartupBuildMsg struct{}
 
 type diffPDFReloadMsg struct {
 	Generation int
@@ -91,62 +92,35 @@ type diffPDFRenderInputs struct {
 	PageOverride int
 }
 
-// PrepareNewPDF builds or opens the new endpoint's existing PDF artifacts.
-// Diff mode only supports this for real filesystem new endpoints; git blob
-// endpoints are materialized snapshots and are intentionally not built.
-func PrepareNewPDF(review *diffreview.Review, opts PDFOptions) (*PDFArtifacts, error) {
+// ResolveStartupPDF opens whatever build artifacts already exist for the
+// new endpoint — startup never runs or waits for latexmk, so the diff
+// paints immediately. WantBuild tells the TUI to kick the actual build
+// (or the lmkf wait) as a background command from Init. Diff mode only
+// supports this for real filesystem new endpoints; git blob endpoints
+// are materialized snapshots and are intentionally not built.
+func ResolveStartupPDF(review *diffreview.Review, opts PDFOptions) *PDFArtifacts {
 	path, ok := newEndpointBuildPath(review)
 	if !ok {
-		return &PDFArtifacts{}, nil
+		return &PDFArtifacts{}
 	}
 	res := build.ResolveBuildOutputsOnDisk(path)
 	status := ""
-	buildStale := false
+	wantBuild := !opts.NoBuild
 	watch, projectWatched := ui.LmkfWatchFor(path)
-	switch {
-	case projectWatched && ui.LmkfWatching(path):
-		status = "lmkf is building this paper — skipped own latexmk"
-		if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
-			buildStale = true
-		}
-	case projectWatched:
+	if projectWatched && !ui.LmkfWatching(path) {
 		// lmkf builds a different main file in this project; the reviewed
 		// file is one of its \input dependencies. Adopt the main file's
 		// artefacts (synctex records map per input file) and never launch
 		// a competing latexmk.
 		res = build.ResolveBuildOutputsOnDisk(watch.MainTex)
 		status = "lmkf builds " + filepath.Base(watch.MainTex) + " — using its PDF"
-		if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
-			buildStale = true
-		}
-	case !opts.NoBuild:
-		release, holder, ok := ui.AcquireLmkBuildLock(path)
-		if !ok {
-			status = "latexmk already running (" + holder + ") — using current artifacts"
-			if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
-				buildStale = true
-			}
-			break
-		}
-		runRes, err := build.RunWith(build.Options{
-			TexPath:  path,
-			BuildCmd: opts.BuildCmd,
-			Stderr:   opts.Stderr,
-			Ctx:      opts.Ctx,
-		})
-		release()
-		if runRes != nil {
-			res = runRes
-		}
-		if err != nil {
-			if !opts.Draft {
-				return nil, err
-			}
-			status = "build: " + shortDiffBuildWarning(err)
-			if diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath) {
-				buildStale = true
-			}
-		}
+	} else if projectWatched {
+		status = "lmkf is building this paper — skipped own latexmk"
+	}
+	buildStale := diffStartupArtifactsStale(path, res.PDFPath, res.SyncTeXPath)
+	if projectWatched && !buildStale {
+		// lmkf already produced up-to-date artefacts; nothing to wait for.
+		wantBuild = false
 	}
 	applyBuildMetadata(review, res)
 	pdfDoc, idx, openStatus, openStale := openDiffPDFPair(res)
@@ -165,7 +139,8 @@ func PrepareNewPDF(review *diffreview.Review, opts PDFOptions) (*PDFArtifacts, e
 		Status:     status,
 		BuildStale: buildStale,
 		Result:     res,
-	}, nil
+		WantBuild:  wantBuild,
+	}
 }
 
 func (m Model) startPDFReload(runBuild bool) (Model, tea.Cmd) {

@@ -152,7 +152,7 @@ type Options struct {
 	RequestedAllowMods bool
 	Status             string
 	NoBuild            bool
-	Draft              bool
+	StartupBuild       bool
 	BuildCmd           string
 	SidecarPath        string
 	StdoutFormat       string
@@ -209,7 +209,7 @@ type Model struct {
 	RequestedAllowMods bool
 
 	NoBuild        bool
-	Draft          bool
+	StartupBuild   bool
 	BuildCmd       string
 	SidecarPath    string
 	StdoutFormat   string
@@ -351,7 +351,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		AllowModifications: opts.AllowModifications,
 		RequestedAllowMods: opts.RequestedAllowMods,
 		NoBuild:            opts.NoBuild,
-		Draft:              opts.Draft,
+		StartupBuild:       opts.StartupBuild,
 		BuildCmd:           opts.BuildCmd,
 		SidecarPath:        opts.SidecarPath,
 		StdoutFormat:       opts.StdoutFormat,
@@ -430,10 +430,19 @@ func (m *Model) pushEditSnapshot(label string) error {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	if m.OpenCompare {
-		return m.compareEditorCmd()
+	var cmds []tea.Cmd
+	if m.StartupBuild {
+		// The actual latexmk run (or lmkf wait) happens here, off the
+		// startup path — the diff painted without it.
+		cmds = append(cmds, func() tea.Msg { return diffStartupBuildMsg{} })
 	}
-	return nil
+	if m.OpenCompare {
+		cmds = append(cmds, m.compareEditorCmd())
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // CurrentPair returns the selected semantic pair.

@@ -32,7 +32,7 @@ const exitCodeAnnotations = 10
 type diffOpts struct {
 	Base    string `long:"base" description:"compare REV:<path> against the working-tree path"`
 	NoBuild bool   `long:"no-build" description:"skip latexmk build for the new endpoint"`
-	Draft   bool   `long:"draft" description:"open TUI even when the new build fails"`
+	Draft   bool   `long:"draft" description:"deprecated no-op: the build is async and the TUI always opens"`
 
 	BuildCmd string `long:"build-cmd" description:"override latexmk command for the new endpoint"`
 	Sidecar  string `long:"sidecar" description:"path to diff sidecar file"`
@@ -203,20 +203,10 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	if buildCmd == "" {
 		buildCmd = cfg.BuildCmd
 	}
-	pdfArtifacts, pdfErr := diffui.PrepareNewPDF(review, diffui.PDFOptions{
+	pdfArtifacts := diffui.ResolveStartupPDF(review, diffui.PDFOptions{
 		NoBuild:  o.NoBuild,
-		Draft:    o.Draft,
 		BuildCmd: buildCmd,
-		Stderr:   stderr,
-		Ctx:      ctx,
 	})
-	if pdfErr != nil {
-		_, _ = fmt.Fprintf(stderr, "mrevdiff: %v\n", pdfErr)
-		return 1
-	}
-	if pdfArtifacts == nil {
-		pdfArtifacts = &diffui.PDFArtifacts{}
-	}
 	finalPDF := pdfArtifacts.PDF
 	defer func() {
 		if finalPDF != nil {
@@ -278,7 +268,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		AllowModifications: allowEdits,
 		RequestedAllowMods: o.AllowModifications,
 		NoBuild:            o.NoBuild,
-		Draft:              o.Draft,
+		StartupBuild:       pdfArtifacts.WantBuild,
 		BuildCmd:           buildCmd,
 		SidecarPath:        sidecarPath,
 		StdoutFormat:       o.Stdout,

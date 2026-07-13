@@ -1,7 +1,6 @@
 package diffui
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"github.com/lenis2000/mrevdiff/pkg/ui"
 )
 
-func TestPrepareNewPDFUsesNewFilesystemEndpoint(t *testing.T) {
+func TestResolveStartupPDFDefersBuild(t *testing.T) {
 	dir := t.TempDir()
 	oldDir := filepath.Join(dir, "old")
 	newDir := filepath.Join(dir, "new")
@@ -39,57 +38,34 @@ func TestPrepareNewPDFUsesNewFilesystemEndpoint(t *testing.T) {
 		New: diffreview.Endpoint{Kind: diffreview.WorkingFile, Path: newPath, Editable: true},
 	}
 
-	_, err := PrepareNewPDF(review, PDFOptions{
+	artifacts := ResolveStartupPDF(review, PDFOptions{
 		BuildCmd: `printf '%s' "$PWD/$MREVDIFF_BASENAME" > "$MARKER"`,
 	})
-	if err != nil {
-		t.Fatalf("prepare pdf: %v", err)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("startup must not run the build command synchronously")
 	}
-	data, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatalf("read marker: %v", err)
+	if !artifacts.WantBuild {
+		t.Fatalf("startup should request a background build: %#v", artifacts)
 	}
-	want := filepath.Join(newDir, "paper")
-	if got := string(data); !samePath(got, want) {
-		t.Fatalf("build ran for %q, want new endpoint %q", got, want)
+	if !artifacts.BuildStale {
+		t.Fatalf("missing artifacts should read as stale: %#v", artifacts)
 	}
 }
 
-func TestPrepareNewPDFNoBuildSkipsBuildCommand(t *testing.T) {
+func TestResolveStartupPDFNoBuildSkipsBackgroundBuild(t *testing.T) {
 	review, _, newPath := pdfReviewFixture(t)
 	marker := filepath.Join(t.TempDir(), "built.txt")
 	t.Setenv("MARKER", marker)
 
-	artifacts, err := PrepareNewPDF(review, PDFOptions{
+	artifacts := ResolveStartupPDF(review, PDFOptions{
 		NoBuild:  true,
 		BuildCmd: `printf built > "$MARKER"`,
 	})
-	if err != nil {
-		t.Fatalf("prepare pdf: %v", err)
-	}
-	if artifacts == nil {
-		t.Fatalf("expected artifacts")
-	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("build command should not have run for %s", newPath)
 	}
-}
-
-func TestPrepareNewPDFBuildFailureHonorsDraft(t *testing.T) {
-	review, _, _ := pdfReviewFixture(t)
-	var stderr bytes.Buffer
-
-	_, err := PrepareNewPDF(review, PDFOptions{BuildCmd: "false", Stderr: &stderr})
-	if err == nil {
-		t.Fatalf("expected non-draft build failure")
-	}
-
-	artifacts, err := PrepareNewPDF(review, PDFOptions{BuildCmd: "false", Draft: true})
-	if err != nil {
-		t.Fatalf("draft build failure should not abort: %v", err)
-	}
-	if artifacts == nil || !artifacts.BuildStale || !strings.Contains(artifacts.Status, "build:") {
-		t.Fatalf("draft artifacts = %#v, want stale build warning", artifacts)
+	if artifacts.WantBuild {
+		t.Fatalf("--no-build must not request a background build: %#v", artifacts)
 	}
 }
 
@@ -190,21 +166,63 @@ func TestApplyPDFReloadClearsOldArtifactsWhenReloadHasNoPair(t *testing.T) {
 	}
 }
 
-func TestPrepareNewPDFSkipsBuildWhenLmkfIsWatching(t *testing.T) {
+func TestResolveStartupPDFSkipsBuildWhenLmkfIsWatching(t *testing.T) {
 	review, _, newPath := pdfReviewFixture(t)
 	fakeLmkfWatcher(t, newPath)
 	marker := filepath.Join(t.TempDir(), "built.txt")
 	t.Setenv("MARKER", marker)
 
-	artifacts, err := PrepareNewPDF(review, PDFOptions{BuildCmd: `printf built > "$MARKER"`})
-	if err != nil {
-		t.Fatalf("prepare pdf: %v", err)
-	}
+	artifacts := ResolveStartupPDF(review, PDFOptions{BuildCmd: `printf built > "$MARKER"`})
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("build command should not run while lmkf is active")
 	}
-	if artifacts == nil || !strings.Contains(artifacts.Status, "lmkf is building") {
+	if !strings.Contains(artifacts.Status, "lmkf is building") {
 		t.Fatalf("lmkf status missing from artifacts: %#v", artifacts)
+	}
+	// No artifacts on disk yet: the background command should wait for
+	// lmkf's pass and reload when it lands.
+	if !artifacts.WantBuild {
+		t.Fatalf("stale lmkf artifacts should request a background wait: %#v", artifacts)
+	}
+
+	installSampleArtifacts(t, newPath)
+	writeLmkfLog(t, newPath, "Here is how much of TeX's memory you used")
+	markLmkfFilesFresh(t, newPath)
+	fresh := ResolveStartupPDF(review, PDFOptions{BuildCmd: `printf built > "$MARKER"`})
+	if fresh.PDF != nil {
+		defer func() { _ = fresh.PDF.Close() }()
+	}
+	if fresh.WantBuild {
+		t.Fatalf("fresh lmkf artifacts must not request a background build: %#v", fresh)
+	}
+	if fresh.PDF == nil || fresh.Synctex == nil {
+		t.Fatalf("fresh artifacts should open at startup: %#v", fresh)
+	}
+}
+
+// TestStartupBuildRunsInBackground pins the async-startup contract: Init
+// emits the kick message, and handling it starts a PDF reload (gen bump +
+// build command) instead of blocking model construction.
+func TestStartupBuildRunsInBackground(t *testing.T) {
+	review, _, _ := pdfReviewFixture(t)
+	m := New(review, Options{StartupBuild: true})
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatalf("StartupBuild Init should emit the kick command")
+	}
+	next, buildCmd := m.Update(diffStartupBuildMsg{})
+	nm, ok := next.(Model)
+	if !ok {
+		t.Fatalf("unexpected model type %T", next)
+	}
+	if buildCmd == nil {
+		t.Fatalf("startup build message should schedule the background build")
+	}
+	if nm.pdfReloadGen != m.pdfReloadGen+1 {
+		t.Fatalf("reload generation = %d, want %d", nm.pdfReloadGen, m.pdfReloadGen+1)
+	}
+	if !strings.Contains(nm.Status, "building new PDF in the background") {
+		t.Fatalf("status = %q, want background-build notice", nm.Status)
 	}
 }
 
