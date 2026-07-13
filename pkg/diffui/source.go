@@ -25,6 +25,55 @@ const (
 type sourcePart struct {
 	Text string
 	Kind sourcePartKind
+	// Search marks the part as an occurrence of the active / query; the
+	// styling layer paints it with the search background. Set only by
+	// decorateSearchParts at render time — never inside memoized rows,
+	// which outlive any particular query.
+	Search bool
+}
+
+// renderSearchTerm is the active / query, set by View before rendering.
+// Package-level (like the render memos) because the cell renderers are
+// free functions shared with the mouse click mapping; Update and View run
+// on one goroutine. Lowercase; empty disables highlighting.
+var renderSearchTerm string
+
+// decorateSearchParts splits parts so occurrences of the active search
+// term (case-insensitive) carry Search=true. The concatenated text is
+// unchanged, so wrapping — and therefore the click mapping's geometry —
+// is identical with or without an active search.
+func decorateSearchParts(parts []sourcePart, term string) []sourcePart {
+	if term == "" {
+		return parts
+	}
+	out := make([]sourcePart, 0, len(parts))
+	for _, part := range parts {
+		lower := strings.ToLower(part.Text)
+		if len(lower) != len(part.Text) {
+			// Lowercasing changed byte offsets (rare non-ASCII case
+			// folding); keep the part undecorated rather than mis-slice.
+			out = append(out, part)
+			continue
+		}
+		rest := part.Text
+		restLower := lower
+		for {
+			i := strings.Index(restLower, term)
+			if i < 0 {
+				break
+			}
+			if i > 0 {
+				out = append(out, sourcePart{Text: rest[:i], Kind: part.Kind})
+			}
+			out = append(out, sourcePart{Text: rest[i : i+len(term)], Kind: part.Kind, Search: true})
+			rest = rest[i+len(term):]
+			restLower = restLower[i+len(term):]
+		}
+		if rest != "" {
+			out = append(out, sourcePart{Text: rest, Kind: part.Kind})
+		}
+	}
+	return out
 }
 
 type sourceRow struct {
@@ -880,6 +929,7 @@ func wrapSourceCellStyled(mark string, line int, text string, parts []sourcePart
 	if len(parts) == 0 {
 		parts = []sourcePart{{Text: text, Kind: sourcePartEqual}}
 	}
+	parts = decorateSearchParts(parts, renderSearchTerm)
 	contentW := width - prefixW
 	chunks := wrapPartsHard(parts, contentW)
 	if len(chunks) == 0 {
@@ -1064,9 +1114,18 @@ func sourceRowMatchesAnchor(row sourceRow, rowIndex int, oldAnchorLine, newAncho
 func styleSourceParts(parts []sourcePart, mark string, oldSide bool) string {
 	var b strings.Builder
 	for _, part := range parts {
-		b.WriteString(styleForSourcePart(mark, part.Kind, oldSide).Render(part.Text))
+		b.WriteString(styleForSourcePartFull(part, mark, oldSide).Render(part.Text))
 	}
 	return b.String()
+}
+
+var searchMatchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true)
+
+func styleForSourcePartFull(part sourcePart, mark string, oldSide bool) lipgloss.Style {
+	if part.Search {
+		return searchMatchStyle
+	}
+	return styleForSourcePart(mark, part.Kind, oldSide)
 }
 
 func styleForSourcePart(mark string, kind sourcePartKind, oldSide bool) lipgloss.Style {

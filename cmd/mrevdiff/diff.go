@@ -265,6 +265,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		Styles:             ui.StylesForTheme(cfg.Theme),
 		Sidecar:            sidecar,
 		SidecarBase:        sidecarBase,
+		SidecarMTime:       loadedSidecarMTime,
 		AllowModifications: allowEdits,
 		RequestedAllowMods: o.AllowModifications,
 		NoBuild:            o.NoBuild,

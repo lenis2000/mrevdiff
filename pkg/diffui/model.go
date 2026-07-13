@@ -3,7 +3,9 @@ package diffui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -145,6 +147,7 @@ type Options struct {
 	DiffRegime         DiffRegime
 	Sidecar            *diffreview.Sidecar
 	SidecarBase        *diffreview.Sidecar
+	SidecarMTime       time.Time
 	Reviewed           map[string]bool
 	Annotations        map[string]string
 	Issues             map[string][]string
@@ -212,6 +215,7 @@ type Model struct {
 	StartupBuild   bool
 	BuildCmd       string
 	SidecarPath    string
+	SidecarMTime   time.Time
 	StdoutFormat   string
 	OpenCompare    bool
 	PDF            *pdf.Doc
@@ -263,6 +267,10 @@ type Model struct {
 	// both exactly.
 	prevLayout LayoutMode
 	prevFocus  Pane
+
+	// searchHistory holds this session's submitted / queries, oldest
+	// first, recalled with Up/Ctrl+P inside the search prompt.
+	searchHistory []string
 
 	ShowHelp bool
 	// CountBuf accumulates digit prefixes for Vim-style diff motions (e.g. "10j").
@@ -354,6 +362,7 @@ func New(review *diffreview.Review, opts Options) Model {
 		StartupBuild:       opts.StartupBuild,
 		BuildCmd:           opts.BuildCmd,
 		SidecarPath:        opts.SidecarPath,
+		SidecarMTime:       opts.SidecarMTime,
 		StdoutFormat:       opts.StdoutFormat,
 		OpenCompare:        opts.OpenCompare,
 		PDF:                opts.PDF,
@@ -444,6 +453,28 @@ func (m Model) Init() tea.Cmd {
 		return nil
 	}
 	return tea.Batch(cmds...)
+}
+
+// flushSidecar writes the current annotations/marks to the sidecar
+// without quitting, so an agent (or the user) can read the review state
+// mid-session. Uses the same merge-on-concurrent-edit path as the final
+// save on quit.
+func (m Model) flushSidecar() (tea.Model, tea.Cmd) {
+	if m.SidecarPath == "" {
+		m.Status = "O: no sidecar path for this review"
+		return m, nil
+	}
+	final := m.FinalSidecar()
+	if err := diffreview.SaveSidecarMerging(m.SidecarPath, m.SidecarBase, m.SidecarMTime, final); err != nil {
+		m.Status = "O: sidecar write failed — " + err.Error()
+		return m, nil
+	}
+	m.SidecarBase = diffreview.CloneSidecar(final)
+	if st, err := os.Stat(m.SidecarPath); err == nil {
+		m.SidecarMTime = st.ModTime()
+	}
+	m.Status = "annotations written to " + filepath.Base(m.SidecarPath)
+	return m, nil
 }
 
 // CurrentPair returns the selected semantic pair.

@@ -265,6 +265,12 @@ func (m Model) runAction(action Action, count int) (tea.Model, tea.Cmd) {
 		return m.nextMatch(-1)
 	case ActionAnnotationList:
 		return m.openAnnList()
+	case ActionAnnotNext:
+		return m.jumpAnnotation(1)
+	case ActionAnnotPrev:
+		return m.jumpAnnotation(-1)
+	case ActionSidecarFlush:
+		return m.flushSidecar()
 	case ActionInfo:
 		m.ShowInfo = true
 		return m, nil

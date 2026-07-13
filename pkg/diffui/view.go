@@ -40,6 +40,7 @@ func (m Model) View() string {
 	if m.Width <= 0 || m.Height <= 0 {
 		return "loading..."
 	}
+	renderSearchTerm = m.activeSearchTerm()
 	bodyHeight := m.Height - statusBarHeight
 	if bodyHeight < 1 {
 		bodyHeight = 1
@@ -72,14 +73,18 @@ func (m Model) View() string {
 	case LayoutStacked:
 		outlineW, rightW := m.stackedWidths(m.Width)
 		topH, pdfH := m.stackedHeights(bodyHeight)
-		outline := m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline)
+		outline := m.overlayOutlineScrollbar(
+			m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline),
+			bodyHeight)
 		comparison := m.renderComparisonArea(rightW, topH)
 		pdf := m.renderPDFPane(pdfWMin(rightW), pdfH, m.Focus == PanePDF)
 		right := lipgloss.JoinVertical(lipgloss.Left, comparison, pdf)
 		main = lipgloss.JoinHorizontal(lipgloss.Top, outline, right)
 	case LayoutNoPDF:
 		outlineW, sourceW := m.noPDFWidths(m.Width)
-		outline := m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline)
+		outline := m.overlayOutlineScrollbar(
+			m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline),
+			bodyHeight)
 		comparison := m.renderComparisonArea(sourceW, bodyHeight)
 		main = lipgloss.JoinHorizontal(lipgloss.Top, outline, comparison)
 	case LayoutSourcesPDF:
@@ -96,7 +101,9 @@ func (m Model) View() string {
 		main = m.renderPDFPane(m.Width, bodyHeight, true)
 	default:
 		outlineW, sourceW, pdfW := m.paneWidths(m.Width)
-		outline := m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline)
+		outline := m.overlayOutlineScrollbar(
+			m.renderPane("Outline", m.renderOutline(outlineW-2, bodyHeight-2), outlineW, bodyHeight, m.Focus == PaneOutline),
+			bodyHeight)
 		comparison := m.renderComparisonArea(sourceW, bodyHeight)
 		pdf := m.renderPDFPane(pdfW, bodyHeight, m.Focus == PanePDF)
 		main = lipgloss.JoinHorizontal(lipgloss.Top, outline, comparison, pdf)
@@ -131,8 +138,10 @@ func (m Model) renderComparisonArea(width, height int) string {
 	// rows steal the match and makes the visible source window jump around.
 	oldBody := RenderPairSourceSideHighlighted(pair, true, oldW-2, height-2, oldAnchor, 0)
 	newBody := RenderPairSourceSideHighlighted(pair, false, newW-2, height-2, 0, newAnchor)
-	oldSource := m.renderPaneRaw("Old source", oldBody, oldW, height, m.Focus == PaneOldSource)
-	newSource := m.renderPaneRaw("New source", newBody, newW, height, m.Focus == PaneNewSource)
+	oldSource := m.overlaySourceScrollbar(
+		m.renderPaneRaw("Old source", oldBody, oldW, height, m.Focus == PaneOldSource), true, oldW-2, height)
+	newSource := m.overlaySourceScrollbar(
+		m.renderPaneRaw("New source", newBody, newW, height, m.Focus == PaneNewSource), false, newW-2, height)
 	return lipgloss.JoinHorizontal(lipgloss.Top, oldSource, newSource)
 }
 
@@ -149,7 +158,8 @@ func (m Model) renderNewSourceArea(width, height int) string {
 	_, newAnchor := m.sourceAnchorLines()
 	pair := m.CurrentDisplayPair()
 	body := RenderPairSourceSideHighlighted(pair, false, width-2, height-2, 0, newAnchor)
-	return m.renderPaneRaw("New source", body, width, height, m.Focus == PaneNewSource)
+	return m.overlaySourceScrollbar(
+		m.renderPaneRaw("New source", body, width, height, m.Focus == PaneNewSource), false, width-2, height)
 }
 
 func (m Model) renderLineEditBody(innerW, innerH int) string {

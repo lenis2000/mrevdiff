@@ -25,7 +25,16 @@ type searchState struct {
 	// put the cursor back.
 	OriginCursor int
 	OriginLine   int
+	// History holds this session's submitted queries, oldest first;
+	// HistoryPos indexes into it during Up/Down recall, with len(History)
+	// meaning the live draft (Draft preserves it while browsing).
+	History    []string
+	HistoryPos int
+	Draft      string
 }
+
+// searchHistoryMax bounds the retained per-session query history.
+const searchHistoryMax = 50
 
 // annListEntry is one row of the @ annotation-list overlay.
 type annListEntry struct {
@@ -43,7 +52,14 @@ type annListState struct {
 
 // startSearch opens the / prompt in the status line.
 func (m Model) startSearch() (tea.Model, tea.Cmd) {
-	m.Search = &searchState{Typing: true, OriginCursor: m.Cursor, OriginLine: m.SourceLineCursor}
+	history := m.searchHistory
+	m.Search = &searchState{
+		Typing:       true,
+		OriginCursor: m.Cursor,
+		OriginLine:   m.SourceLineCursor,
+		History:      history,
+		HistoryPos:   len(history),
+	}
 	m.Status = "/"
 	return m, nil
 }
@@ -63,7 +79,12 @@ func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		s.Typing = false
 		s.Query = s.Input
+		m.appendSearchHistory(s.Query)
 		return m.runSearch()
+	case tea.KeyUp, tea.KeyCtrlP:
+		return m.recallSearchHistory(-1)
+	case tea.KeyDown, tea.KeyCtrlN:
+		return m.recallSearchHistory(1)
 	case tea.KeyBackspace:
 		if len(s.Input) > 0 {
 			r := []rune(s.Input)
@@ -75,6 +96,47 @@ func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		s.Input += " "
 	}
 	return m.incrementalSearch()
+}
+
+// recallSearchHistory steps through previously submitted queries with
+// Up/Ctrl+P (older) and Down/Ctrl+N (newer); the slot past the newest
+// entry restores the draft that was being typed.
+func (m Model) recallSearchHistory(dir int) (tea.Model, tea.Cmd) {
+	s := m.Search
+	if len(s.History) == 0 {
+		return m, nil
+	}
+	if s.HistoryPos == len(s.History) {
+		s.Draft = s.Input
+	}
+	pos := s.HistoryPos + dir
+	if pos < 0 || pos > len(s.History) {
+		return m, nil
+	}
+	s.HistoryPos = pos
+	if pos == len(s.History) {
+		s.Input = s.Draft
+	} else {
+		s.Input = s.History[pos]
+	}
+	return m.incrementalSearch()
+}
+
+// appendSearchHistory records a submitted query on the model (the search
+// overlay is recreated per /, so the history lives on the Model). Empty
+// queries and consecutive duplicates are dropped.
+func (m *Model) appendSearchHistory(query string) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return
+	}
+	if n := len(m.searchHistory); n > 0 && m.searchHistory[n-1] == query {
+		return
+	}
+	m.searchHistory = append(m.searchHistory, query)
+	if len(m.searchHistory) > searchHistoryMax {
+		m.searchHistory = m.searchHistory[len(m.searchHistory)-searchHistoryMax:]
+	}
 }
 
 // incrementalSearch runs the query live while it is being typed: the
@@ -418,4 +480,70 @@ func wrapPlainLine(s string, width int) []string {
 	}
 	out = append(out, cur)
 	return out
+}
+
+// jumpAnnotation moves the cursor to the next (+1) or previous (-1)
+// annotated pair, wrapping around the review.
+func (m Model) jumpAnnotation(delta int) (tea.Model, tea.Cmd) {
+	if m.Review == nil || len(m.Annotations) == 0 {
+		m.Status = "no annotations yet — a annotates the current pair"
+		return m, nil
+	}
+	var annotated []int
+	for i := range m.Review.Pairs {
+		if m.Annotations[m.Review.Pairs[i].ID] != "" {
+			annotated = append(annotated, i)
+		}
+	}
+	if len(annotated) == 0 {
+		m.Status = "no annotations yet — a annotates the current pair"
+		return m, nil
+	}
+	target := -1
+	if delta > 0 {
+		for _, idx := range annotated {
+			if idx > m.Cursor {
+				target = idx
+				break
+			}
+		}
+		if target < 0 {
+			target = annotated[0]
+		}
+	} else {
+		for i := len(annotated) - 1; i >= 0; i-- {
+			if annotated[i] < m.Cursor {
+				target = annotated[i]
+				break
+			}
+		}
+		if target < 0 {
+			target = annotated[len(annotated)-1]
+		}
+	}
+	pos := 0
+	for i, idx := range annotated {
+		if idx == target {
+			pos = i
+			break
+		}
+	}
+	m.Cursor = target
+	m.SourceLineCursor = 1
+	m.snapCursor()
+	m.Status = fmt.Sprintf("annotation %d/%d: %s", pos+1, len(annotated), m.Review.Pairs[target].ID)
+	return m.withPDFRender()
+}
+
+// activeSearchTerm returns the lowercase term the source panes should
+// highlight: the live input while typing, else the submitted query.
+func (m Model) activeSearchTerm() string {
+	s := m.Search
+	if s == nil {
+		return ""
+	}
+	if s.Typing {
+		return strings.ToLower(strings.TrimSpace(s.Input))
+	}
+	return strings.ToLower(strings.TrimSpace(s.Query))
 }

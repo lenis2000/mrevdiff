@@ -286,8 +286,12 @@ func (m Model) clickSourceLine(pane Pane, x, y int) (Model, bool) {
 	// Content rows start below the pane border and title line.
 	const rowsTop = 2
 	rowInView := y - rowsTop
-	viewH := geo.height - 3 // top border + title + bottom border
-	if rowInView < 0 || rowInView >= viewH {
+	// The renderer computes its scroll window with paneHeight-2 lines and
+	// the pane displays one fewer (border+title+border eat three rows);
+	// mapping must use the renderer's window height or the two drift at
+	// the bottom of a long block.
+	windowH := geo.height - 2
+	if rowInView < 0 || rowInView >= geo.height-3 {
 		return m, false
 	}
 	pair := m.CurrentDisplayPair()
@@ -299,11 +303,11 @@ func (m Model) clickSourceLine(pane Pane, x, y int) (Model, bool) {
 		contentX := x - geo.x0 - 1
 		oldW := (geo.width - 2 - 3) / 2
 		oldSide = contentX <= oldW
-		absLine, found = sourceCombinedLineAtRow(pair, geo.width-2, viewH, oldAnchor, newAnchor, rowInView, oldSide)
+		absLine, found = sourceCombinedLineAtRow(pair, geo.width-2, windowH, oldAnchor, newAnchor, rowInView, oldSide)
 	} else if oldSide {
-		absLine, found = sourceSideLineAtRow(pair, true, geo.width-2, viewH, oldAnchor, 0, rowInView)
+		absLine, found = sourceSideLineAtRow(pair, true, geo.width-2, windowH, oldAnchor, 0, rowInView)
 	} else {
-		absLine, found = sourceSideLineAtRow(pair, false, geo.width-2, viewH, 0, newAnchor, rowInView)
+		absLine, found = sourceSideLineAtRow(pair, false, geo.width-2, windowH, 0, newAnchor, rowInView)
 	}
 	if !found {
 		return m, false

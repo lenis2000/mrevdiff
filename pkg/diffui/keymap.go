@@ -35,6 +35,9 @@ const (
 	ActionAnnotateEdit   Action = "annotate-edit"
 	ActionAnnotateDelete Action = "annotate-delete"
 	ActionAnnotationList Action = "annotation-list"
+	ActionAnnotNext      Action = "annotation-next"
+	ActionAnnotPrev      Action = "annotation-prev"
+	ActionSidecarFlush   Action = "sidecar-flush"
 	ActionCopy           Action = "copy"
 	ActionSearch         Action = "search"
 	ActionSearchNext     Action = "search-next"
@@ -94,6 +97,9 @@ func actionCatalog() []actionMeta {
 		{ActionAnnotateEdit, "edit the current annotation", "Edit current annotation"},
 		{ActionAnnotateDelete, "delete the current annotation", "Delete current annotation"},
 		{ActionAnnotationList, "open the annotation list", "Open annotation list"},
+		{ActionAnnotNext, "jump to the next annotated pair", "Next annotation"},
+		{ActionAnnotPrev, "jump to the previous annotated pair", "Previous annotation"},
+		{ActionSidecarFlush, "write annotations to the sidecar now (without quitting)", "Write annotations to sidecar now"},
 		{ActionCopy, "copy the selected change (side follows focus)", "Copy selected change"},
 		{ActionSearch, "search pairs (text, labels, IDs)", "Search pairs (text, labels, IDs)"},
 		{ActionSearchNext, "next search match", ""},
@@ -166,6 +172,9 @@ func defaultBindings() map[string]Action {
 		"ctrl+a": ActionAnnotateEdit,
 		"d":      ActionAnnotateDelete,
 		"@":      ActionAnnotationList,
+		")":      ActionAnnotNext,
+		"(":      ActionAnnotPrev,
+		"O":      ActionSidecarFlush,
 		"y":      ActionCopy,
 		"/":      ActionSearch,
 		"n":      ActionSearchNext,
