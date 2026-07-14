@@ -32,6 +32,8 @@ type sourcePart struct {
 	Search bool
 }
 
+const sourceTabReplacement = "    "
+
 // renderSearchTerm is the active / query, set by View before rendering.
 // Package-level (like the render memos) because the cell renderers are
 // free functions shared with the mouse click mapping; Update and View run
@@ -908,6 +910,7 @@ func wrapSourceCell(mark string, line int, text string, width int, cursor bool) 
 	if prefixW >= width {
 		return []string{clipLine(prefix+text, width)}
 	}
+	text = expandSourceTabs(text)
 	textW := width - prefixW
 	chunks := wrapTextRunes(text, textW)
 	out := make([]string, 0, len(chunks))
@@ -933,6 +936,7 @@ func wrapSourceCellStyled(mark string, line int, text string, parts []sourcePart
 	if len(parts) == 0 {
 		parts = []sourcePart{{Text: text, Kind: sourcePartEqual}}
 	}
+	parts = expandSourcePartTabs(parts)
 	parts = decorateSearchParts(parts, renderSearchTerm)
 	contentW := width - prefixW
 	chunks := wrapPartsHard(parts, contentW)
@@ -950,6 +954,37 @@ func wrapSourceCellStyled(mark string, line int, text string, parts []sourcePart
 			lineParts = append(lineParts, sourcePart{Text: strings.Repeat(" ", width-visiblePartsWidth(lineParts)), Kind: sourcePartEqual})
 		}
 		out = append(out, styleSourceParts(lineParts, mark, oldSide))
+	}
+	return out
+}
+
+// expandSourceTabs keeps source rows independent of the pane's absolute
+// terminal column. A literal tab advances to the terminal's next tab stop, so
+// counting it as one rune makes the painted row wider than the wrapper thought
+// it was and clips characters against the pane border. Four spaces matches the
+// formatter's space.tabs rule and gives both sides identical geometry.
+func expandSourceTabs(text string) string {
+	return strings.ReplaceAll(text, "\t", sourceTabReplacement)
+}
+
+func expandSourcePartTabs(parts []sourcePart) []sourcePart {
+	var out []sourcePart
+	for i, part := range parts {
+		if !strings.ContainsRune(part.Text, '\t') {
+			if out != nil {
+				out = append(out, part)
+			}
+			continue
+		}
+		if out == nil {
+			out = make([]sourcePart, 0, len(parts))
+			out = append(out, parts[:i]...)
+		}
+		part.Text = expandSourceTabs(part.Text)
+		out = append(out, part)
+	}
+	if out == nil {
+		return parts
 	}
 	return out
 }

@@ -117,6 +117,34 @@ func TestRenderPairSourceWrapsLongLines(t *testing.T) {
 	}
 }
 
+func TestWrapSourceCellStyledExpandsTabsBeforeWrapping(t *testing.T) {
+	const source = "\tWe prove that in this setting, colored interlacing triangles are in"
+	const width = 53
+	lines := wrapSourceCellStyled(" ", 115, source,
+		[]sourcePart{{Text: source, Kind: sourcePartEqual}}, width, true, false)
+
+	for _, line := range lines {
+		if strings.ContainsRune(line, '\t') {
+			t.Fatalf("wrapped source row contains a terminal-dependent tab: %q", line)
+		}
+		if got := ansiVisibleWidth(line); got != width {
+			t.Fatalf("wrapped source row width = %d, want %d: %q", got, width, line)
+		}
+	}
+
+	var content strings.Builder
+	const prefixWidth = 7
+	for _, line := range lines {
+		runes := []rune(line)
+		content.WriteString(string(runes[prefixWidth:]))
+	}
+	got := strings.TrimRight(content.String(), " ")
+	want := strings.ReplaceAll(source, "\t", "    ")
+	if got != want {
+		t.Fatalf("wrapped source did not preserve its text:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestRenderPairSourceForAddedDeletedChangedAndFormatOnly(t *testing.T) {
 	review := fixtureReview()
 
