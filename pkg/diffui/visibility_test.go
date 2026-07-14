@@ -178,3 +178,46 @@ func TestHelpListsNewBindings(t *testing.T) {
 		}
 	}
 }
+
+// TestHelpIsModal pins that the ? help claims the keyboard: it is a full-screen
+// overlay that hides the panes, so nothing may fire behind it. Esc and ? close
+// it, q closes it WITHOUT quitting the review (q only quits from the main view),
+// and every other key is swallowed.
+func TestHelpIsModal(t *testing.T) {
+	open := func() Model {
+		m := New(fixtureReview(), Options{})
+		m.Width, m.Height = 160, 40
+		m.ShowHelp = true
+		return m
+	}
+	press := func(m Model, k string) Model {
+		var msg tea.KeyMsg
+		if k == "esc" {
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		} else {
+			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+		}
+		next, _ := m.Update(msg)
+		return next.(Model)
+	}
+
+	for _, k := range []string{"esc", "?", "q"} {
+		if m := press(open(), k); m.ShowHelp {
+			t.Errorf("%q did not close the help overlay", k)
+		}
+	}
+	// q must close the help, never quit the review from under it.
+	if m := press(open(), "q"); m.quitting {
+		t.Error("q quit the review from inside the help overlay; it must only quit from the main view")
+	}
+	// Other keys are swallowed: nothing moves behind the overlay.
+	m := open()
+	before := m.Cursor
+	after := press(m, "j")
+	if !after.ShowHelp {
+		t.Error("j closed the help overlay")
+	}
+	if after.Cursor != before {
+		t.Errorf("j moved the cursor behind the help overlay: %d -> %d", before, after.Cursor)
+	}
+}

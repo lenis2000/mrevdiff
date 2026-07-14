@@ -139,6 +139,23 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// The ? help is a full-screen overlay — it hides the panes entirely — so
+	// it claims the keyboard rather than letting bindings fire behind it.
+	// Esc, q and ? all back out of it; q closes the help instead of quitting
+	// the review, so it only ever quits from the main view. ctrl+c above
+	// stays the hard quit.
+	if m.ShowHelp {
+		m.discardArmed = false
+		m.CountBuf = ""
+		m.pendingG = false
+		switch action := m.Keymap.Lookup(key); {
+		case key == "esc", action == ActionHelp, action == ActionQuit:
+			m.ShowHelp = false
+			m.Status = ""
+		}
+		return m, nil
+	}
+
 	action := m.Keymap.Lookup(key)
 
 	if action == ActionQuit {
@@ -163,14 +180,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.discardArmed = false
+	// Only ever opens it: an open help is handled as a modal above.
 	if action == ActionHelp {
-		m.ShowHelp = !m.ShowHelp
+		m.ShowHelp = true
 		m.CountBuf = ""
 		m.pendingG = false
-		return m, nil
-	}
-	if m.ShowHelp {
-		m.CountBuf = ""
 		return m, nil
 	}
 
