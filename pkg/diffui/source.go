@@ -1123,7 +1123,11 @@ func styleSourceParts(parts []sourcePart, mark string, oldSide bool) string {
 	return b.String()
 }
 
-var searchMatchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true)
+// searchMatchStyle paints / query hits. It is deliberately blue: every other
+// colour in the source panes is warm (olive for a changed row, green for an
+// added token, red for a deleted one), so a saturated blue with white text is
+// the one thing that cannot be mistaken for diff styling underneath it.
+var searchMatchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("33")).Bold(true)
 
 func styleForSourcePartFull(part sourcePart, mark string, oldSide bool) lipgloss.Style {
 	if part.Search {

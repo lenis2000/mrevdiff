@@ -89,7 +89,7 @@ func TestSearchHighlightPaints(t *testing.T) {
 	m := New(fixtureReview(), Options{})
 	m.Width, m.Height = 160, 40
 	m.Search = &searchState{Typing: true, Input: "beta"}
-	if view := m.View(); !strings.Contains(view, "48;5;220") {
+	if view := m.View(); !strings.Contains(view, "48;5;33") {
 		t.Error("rendered view with an active search carries no searchMatchStyle — nothing is highlighted")
 	}
 }
