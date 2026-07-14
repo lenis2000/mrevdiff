@@ -47,10 +47,10 @@ type FitOptions struct {
 	// Default 20pt when zero.
 	HpadPt float64
 
-	// MarkRegion draws a marker around the exact SyncTeX region inside
-	// the crop: crops deliberately include context (adaptive vpad, full
-	// column width), so without an anchor the eye has to hunt for the
-	// lines that actually correspond to the cursor block.
+	// MarkRegion rules the line where the SyncTeX region starts inside the
+	// crop: crops deliberately include context (adaptive vpad, full column
+	// width), so without an anchor the eye has to hunt for the lines that
+	// actually correspond to the cursor block.
 	MarkRegion bool
 }
 
@@ -313,7 +313,7 @@ func CropFitted(d *Doc, r synctex.Region, opts FitOptions) (png []byte, pxW, pxH
 }
 
 // RenderPageFitted renders the whole page at the DPI that fits it into the
-// pane and (when MarkRegion) draws the marker around r. Unlike CropFitted
+// pane and (when MarkRegion) rules the line where r starts. Unlike CropFitted
 // it never slices — floats, margins, figure placement, and page context
 // are all visible — so it backs the full-page preview toggle. r only
 // positions the marker; a zero-extent or off-page r renders the page
@@ -374,12 +374,18 @@ func RenderPageFitted(d *Doc, page int, r synctex.Region, opts FitOptions) (png 
 	return buf.Bytes(), pxW, pxH, nil
 }
 
-// markRegionColor is the marker ink: amber, readable on both the white
-// page and dark figures without masking the text underneath.
-var markRegionColor = color.RGBA{R: 255, G: 165, B: 0, A: 255}
+// markRegionColor is the marker ink: the same red the forward-sync rule uses
+// in the CLI PDF/EPUB reader, readable on both the white page and dark
+// figures without masking the text underneath.
+var markRegionColor = color.RGBA{R: 200, G: 30, B: 30, A: 255}
 
-// markRegion returns a copy of img with an amber outline drawn around
-// regionRect (given in img's own coordinate space, clamped to bounds).
+// markRegion returns a copy of img marking where the change starts: a rule
+// spanning the full width just above the first line of regionRect (given in
+// img's own coordinate space), with a solid triangle at each border pointing
+// along it. Only the entry point is marked — a box around the whole region
+// frames every line of a long change equally and hides the text under its
+// edges, while a single rule says "from here" and leaves the page clean.
+//
 // It MUST copy: img usually aliases the page pixmap held in the Doc's
 // LRU, and drawing in place would permanently scribble the marker onto
 // the cached page for every later crop.
@@ -387,23 +393,26 @@ func markRegion(img image.Image, regionRect image.Rectangle, scale float64) imag
 	bounds := img.Bounds()
 	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(dst, dst.Bounds(), img, bounds.Min, draw.Src)
+	w, h := dst.Bounds().Dx(), dst.Bounds().Dy()
 
-	// A small breathing margin so the outline hugs, not covers, glyph ink;
+	// A small breathing margin so the rule hugs, not covers, glyph ink;
 	// thickness scales with render DPI so it stays a hairline visually.
 	pad := int(2 * scale)
 	thick := int(scale)
 	if thick < 2 {
 		thick = 2
 	}
-	rect := image.Rect(
-		regionRect.Min.X-bounds.Min.X-pad,
-		regionRect.Min.Y-bounds.Min.Y-pad,
-		regionRect.Max.X-bounds.Min.X+pad,
-		regionRect.Max.Y-bounds.Min.Y+pad,
-	).Intersect(dst.Bounds())
-	if rect.Empty() {
+	if w <= 0 || h < thick {
 		return dst
 	}
+	y0 := regionRect.Min.Y - bounds.Min.Y - pad - thick
+	if y0 > h-thick {
+		y0 = h - thick
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+
 	blend := func(x, y int) {
 		c := dst.RGBAAt(x, y)
 		// 70% marker / 30% underlying keeps ink under the line legible.
@@ -413,24 +422,29 @@ func markRegion(img image.Image, regionRect image.Rectangle, scale float64) imag
 		c.A = 255
 		dst.SetRGBA(x, y, c)
 	}
-	for x := rect.Min.X; x < rect.Max.X; x++ {
-		for t := 0; t < thick; t++ {
-			if y := rect.Min.Y + t; y < rect.Max.Y {
-				blend(x, y)
-			}
-			if y := rect.Max.Y - 1 - t; y >= rect.Min.Y {
-				blend(x, y)
-			}
+	for y := y0; y < y0+thick; y++ {
+		for x := 0; x < w; x++ {
+			blend(x, y)
 		}
 	}
-	for y := rect.Min.Y; y < rect.Max.Y; y++ {
-		for t := 0; t < thick; t++ {
-			if x := rect.Min.X + t; x < rect.Max.X {
-				blend(x, y)
+
+	// Border markers: filled triangles with their base on each edge and the
+	// apex on the rule, so the row stays findable when the rule itself runs
+	// over dark ink or a figure.
+	size := int(5 * scale)
+	if size < 7 {
+		size = 7
+	}
+	cy := y0 + thick/2
+	for dx := 0; dx < size && dx < w; dx++ {
+		half := size - dx
+		for dy := -half; dy <= half; dy++ {
+			y := cy + dy
+			if y < 0 || y >= h {
+				continue
 			}
-			if x := rect.Max.X - 1 - t; x >= rect.Min.X {
-				blend(x, y)
-			}
+			dst.SetRGBA(dx, y, markRegionColor)
+			dst.SetRGBA(w-1-dx, y, markRegionColor)
 		}
 	}
 	return dst
