@@ -288,15 +288,33 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 
 	waitRenders = model.WaitPDFRenders
 
+	// MuPDF writes its warnings to fd 2 from C. Anything that reaches the tty
+	// while Bubble Tea owns the alt-screen is drawn into the frame and shifts
+	// every row below it, so the panes duplicate and the status bar doubles.
+	// Park fd 2 in a temp file for the run and report what landed there once
+	// the terminal is ours again. Best-effort: if it cannot be redirected we
+	// still run, we just risk the noise.
+	restoreStderr, stderrErr := redirectStderr()
+
 	final, err := runDiffTUI(model, stdout, stderr)
 	// Bubble Tea abandons in-flight Cmds on quit, so a background build is
 	// still running here: kill its latexmk and drop the lmk-guard lock before
 	// the process exits, or we orphan the compile and leave the lock behind
 	// holding a dead pid for the next lmk/lmkf to reap and race.
 	diffui.StopBuild()
+
+	// Put fd 2 back before anything else tries to write to it.
+	var libNoise []string
+	if stderrErr == nil && restoreStderr != nil {
+		libNoise = restoreStderr()
+	}
+
 	// A stale agterm flag must never outlive the review and point at a
 	// plain shell; clearing is a no-op outside agterm.
 	diffui.AgtermClearFlag()
+	for _, line := range libNoise {
+		_, _ = fmt.Fprintf(stderr, "mrevdiff: %s\n", line)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: tui: %v\n", err)
 		return 1
