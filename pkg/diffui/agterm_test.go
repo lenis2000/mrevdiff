@@ -1,6 +1,7 @@
 package diffui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,78 @@ func forceAgterm(t *testing.T) *[][]string {
 		agtermRun = savedRun
 	})
 	return &calls
+}
+
+// forceAgtermTree stubs the tree read behind agtermSessionName with a name
+// that the recording rename stub keeps current, so mark/restore can be driven
+// end to end. It also clears the mark globals before and after the test.
+func forceAgtermTree(t *testing.T, name string) *string {
+	t.Helper()
+	_ = forceAgterm(t)
+	t.Setenv("AGTERM_PANE", "") // the review speaks for the session
+	current := name
+	savedOutput := agtermOutput
+	agtermOutput = func(args ...string) ([]byte, error) {
+		return []byte(fmt.Sprintf(
+			`{"result":{"tree":{"workspaces":[{"sessions":[{"id":"test-session-uuid","name":%q}]}]}}}`,
+			current)), nil
+	}
+	savedRun := agtermRun
+	agtermRun = func(args ...string) error {
+		if len(args) >= 3 && args[0] == "session" && args[1] == "rename" {
+			current = args[2]
+		}
+		return savedRun(args...)
+	}
+	agtermMarkedName, agtermOrigName = "", ""
+	t.Cleanup(func() {
+		agtermOutput = savedOutput
+		agtermMarkedName, agtermOrigName = "", ""
+	})
+	return &current
+}
+
+// TestAgtermSessionIconMarksAndRestores pins the sidebar mark: the review
+// prefixes the icon onto the name the session already had — keeping the rest
+// of it — and hands that name back on exit.
+func TestAgtermSessionIconMarksAndRestores(t *testing.T) {
+	name := forceAgtermTree(t, "3· SIGMA")
+
+	AgtermMarkSession()
+	if *name != agtermIcon+" SIGMA" {
+		t.Fatalf("mark should prefix the icon onto the undecorated name, got %q", *name)
+	}
+
+	AgtermRestoreSessionName()
+	if *name != "SIGMA" {
+		t.Fatalf("exit should hand the original name back, got %q", *name)
+	}
+}
+
+// TestAgtermSessionIconNotDoubled pins that a session already carrying the
+// icon (a nested review) is left alone, so the icon never stacks up and the
+// exit of the inner review does not strip the outer one's mark.
+func TestAgtermSessionIconNotDoubled(t *testing.T) {
+	name := forceAgtermTree(t, agtermIcon+" SIGMA")
+
+	AgtermMarkSession()
+	AgtermRestoreSessionName()
+	if *name != agtermIcon+" SIGMA" {
+		t.Fatalf("an already-marked session must be left untouched, got %q", *name)
+	}
+}
+
+// TestAgtermSessionIconKeepsUserRename pins that a rename by the user during
+// the review wins: exit must not clobber it with the pre-review name.
+func TestAgtermSessionIconKeepsUserRename(t *testing.T) {
+	name := forceAgtermTree(t, "SIGMA")
+
+	AgtermMarkSession()
+	*name = "renamed by hand"
+	AgtermRestoreSessionName()
+	if *name != "renamed by hand" {
+		t.Fatalf("a mid-review rename is the user's to keep, got %q", *name)
+	}
 }
 
 // TestAgtermFlagFollowsAnnotationsAndFailures pins the reconciler: the

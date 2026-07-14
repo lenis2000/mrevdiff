@@ -296,6 +296,10 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	// still run, we just risk the noise.
 	restoreStderr, stderrErr := redirectStderr()
 
+	// The book icon marks the session as a review for as long as one is open;
+	// no-op outside agterm.
+	diffui.AgtermMarkSession()
+
 	final, err := runDiffTUI(model, stdout, stderr)
 	// Bubble Tea abandons in-flight Cmds on quit, so a background build is
 	// still running here: kill its latexmk and drop the lmk-guard lock before
@@ -309,9 +313,10 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		libNoise = restoreStderr()
 	}
 
-	// A stale agterm flag must never outlive the review and point at a
-	// plain shell; clearing is a no-op outside agterm.
+	// A stale agterm flag or book icon must never outlive the review and
+	// point at a plain shell; both are no-ops outside agterm.
 	diffui.AgtermClearFlag()
+	diffui.AgtermRestoreSessionName()
 	for _, line := range libNoise {
 		_, _ = fmt.Fprintf(stderr, "mrevdiff: %s\n", line)
 	}
