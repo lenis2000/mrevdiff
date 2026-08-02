@@ -345,3 +345,118 @@ func TestWrap_CommandOnlyParagraph_InlineCommandWithTrailingText(t *testing.T) {
 	}, "\n")
 	assert.Equal(t, want, got)
 }
+
+// Display-math env interiors are hand-laid math: the wrap rule must not
+// join the equation body with its \label line, nor column-split the body
+// at an arbitrary space (math.wrap-at-break-op owns math wrapping).
+func TestWrap_DisplayMathEnvInteriorUntouched(t *testing.T) {
+	src := strings.Join([]string{
+		"Intro prose.",
+		"\\begin{equation}",
+		"    H(x) = a + b + c + d + e + f + g + h",
+		"    \\label{eq:1}",
+		"\\end{equation}",
+		"After prose.",
+		"",
+	}, "\n")
+	got := runWrap(src, "column", 30)
+	assert.Equal(t, src, got)
+}
+
+// Same for \[…\] fences: interior lines must be preserved verbatim.
+func TestWrap_DisplayFenceInteriorUntouched(t *testing.T) {
+	src := strings.Join([]string{
+		"\\[",
+		"    x = y + z",
+		"    \\quad w = v",
+		"\\]",
+		"",
+	}, "\n")
+	got := runWrap(src, "column", 40)
+	assert.Equal(t, src, got)
+}
+
+// A `\\[2mm]` row break inside a tabular-like block must NOT be mistaken
+// for a display-math opener (which would silence wrapping of everything
+// after it).
+func TestWrap_RowBreakWithSkipNotMathOpener(t *testing.T) {
+	src := strings.Join([]string{
+		"\\begin{tabular}{cc}",
+		"a & b \\\\[2mm]",
+		"c & d",
+		"\\end{tabular}",
+		"This is a long prose sentence that definitely needs to be wrapped at forty columns.",
+		"",
+	}, "\n")
+	got := runWrap(src, "column", 40)
+	assert.Contains(t, got, "a & b \\\\[2mm]")
+	// The trailing prose must still be wrapped.
+	for _, line := range strings.Split(got, "\n") {
+		assert.LessOrEqual(t, len(line), 40)
+	}
+}
+
+// The body on a \item line reflows (wrapped at the column limit, \item
+// kept at the head), and consecutive items are never merged.
+func TestWrap_ItemBodyWrapped(t *testing.T) {
+	src := strings.Join([]string{
+		"\\begin{enumerate}",
+		"    \\item A very long item body that must be wrapped at the forty column limit set here.",
+		"    \\item Short one.",
+		"\\end{enumerate}",
+		"",
+	}, "\n")
+	got := runWrap(src, "column", 40)
+	for _, line := range strings.Split(got, "\n") {
+		assert.LessOrEqual(t, len(line), 40)
+	}
+	assert.Contains(t, got, "    \\item A very")
+	assert.Contains(t, got, "    \\item Short one.")
+	assert.Equal(t, 2, strings.Count(got, `\item`))
+}
+
+// A \item line joins with its continuation prose lines into one paragraph.
+func TestWrap_ItemJoinsContinuationLines(t *testing.T) {
+	src := strings.Join([]string{
+		"    \\item First part of the item body",
+		"    continues on the next line here.",
+		"",
+	}, "\n")
+	got := runWrap(src, "column", 200)
+	want := "    \\item First part of the item body continues on the next line here.\n"
+	assert.Equal(t, want, got)
+}
+
+// \item-prefixed commands that are not \item itself stay structural.
+func TestWrap_ItemsepStaysStructural(t *testing.T) {
+	src := "\\itemsep 2pt plus 1pt\nSome prose follows here.\n"
+	got := runWrap(src, "column", 200)
+	assert.Equal(t, src, got)
+}
+
+// Reflowed prose collapses interior multi-space runs to a single space.
+func TestWrap_CollapsesDoubleSpaces(t *testing.T) {
+	src := "Foo  bar.   Baz qux with more prose here.\n"
+	got := runWrap(src, "column", 200)
+	want := "Foo bar. Baz qux with more prose here.\n"
+	assert.Equal(t, want, got)
+}
+
+// Spaces inside inline math and inline verbatim are kept byte-for-byte,
+// and \verb content is never broken across lines.
+func TestWrap_KeepsSpacesInsideMathAndVerb(t *testing.T) {
+	src := "Text $a  =  b$ and \\verb|x  y| stay intact here.\n"
+	got := runWrap(src, "column", 200)
+	assert.Equal(t, src, got)
+
+	long := "Some words before the verbatim \\verb|keep  me| and quite a few words after it too.\n"
+	wrapped := runWrap(long, "column", 40)
+	assert.Contains(t, wrapped, "\\verb|keep  me|")
+}
+
+// An escaped space "\ " followed by another space is not collapsed.
+func TestWrap_EscapedSpaceRunKept(t *testing.T) {
+	src := "a\\  b and some more prose words here.\n"
+	got := runWrap(src, "column", 200)
+	assert.Equal(t, src, got)
+}

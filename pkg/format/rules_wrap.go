@@ -90,8 +90,9 @@ func applyWrap(ctx *Ctx) Result {
 
 	// Identify command-only paragraphs (top-matter, \caption{}, \label{},
 	// any line that is exclusively \name[opt]?{...} invocations or a
-	// continuation inside one). These are hand-laid layout — preserve.
-	cmdMask := computeCommandOnlyMask(ctx, nLines)
+	// continuation inside one) and display-math interiors. These are
+	// hand-laid layout — preserve.
+	cmdMask, mathMask := computeCommandOnlyMask(ctx, nLines)
 
 	// Classify each line. Paragraph-aware reflow joins runs of "prose"
 	// lines, splits the joined string at sentence boundaries (and/or
@@ -101,7 +102,7 @@ func applyWrap(ctx *Ctx) Result {
 	kinds := make([]lineKind, nLines+1) // 1-indexed
 	for line := 1; line <= nLines; line++ {
 		k := classifyLineForWrap(ctx, line)
-		if k == kindProse && cmdMask[line] {
+		if k == kindProse && (cmdMask[line] || mathMask[line]) {
 			k = kindStruct
 		}
 		kinds[line] = k
@@ -121,13 +122,15 @@ func applyWrap(ctx *Ctx) Result {
 
 	line := 1
 	for line <= nLines {
-		if kinds[line] != kindProse {
+		if kinds[line] != kindProse && kinds[line] != kindItem {
 			emitLineRaw(line)
 			line++
 			continue
 		}
 
-		// Gather a maximal run of prose lines.
+		// Gather a maximal run of prose lines. A \item line may start a
+		// run (its body reflows with its continuation lines) but never
+		// extends one — the next \item begins its own paragraph.
 		paraStart := line
 		paraEnd := line
 		for paraEnd+1 <= nLines && kinds[paraEnd+1] == kindProse {
@@ -153,7 +156,7 @@ func applyWrap(ctx *Ctx) Result {
 			}
 			joined.WriteString(content)
 		}
-		prose := joined.String()
+		prose := collapseInteriorSpaces(joined.String())
 
 		pieces := wrapProse(prose, lead, col, doSentence, doColumn)
 
@@ -212,15 +215,16 @@ type lineKind int
 
 const (
 	kindBlank  lineKind = iota // blank/whitespace-only — paragraph break
-	kindStruct                 // structural line (env begin/end, section, item, …) — preserved as-is
+	kindStruct                 // structural line (env begin/end, section, …) — preserved as-is
 	kindProse                  // joinable prose — eligible for paragraph reflow
+	kindItem                   // \item line — starts its own reflowable paragraph
 )
 
 // structPrefixes are leading tokens that mark a line as structural
 // (i.e. NOT eligible for paragraph reflow).
 var structPrefixes = []string{
 	`\begin{`, `\end{`,
-	`\item`, `\noindent`,
+	`\noindent`,
 	`\section`, `\subsection`, `\subsubsection`,
 	`\paragraph`, `\subparagraph`,
 	`\chapter`, `\part`,
@@ -257,6 +261,17 @@ func classifyLineForWrap(ctx *Ctx, line int) lineKind {
 
 	// Forced row break.
 	if strings.HasSuffix(strings.TrimRight(bodyContent, " \t"), `\\`) {
+		return kindStruct
+	}
+
+	// A list item starts its own reflowable paragraph: the body on the
+	// \item line wraps together with its continuation lines. Other
+	// \item-prefixed commands (\itemsep, \itemindent, …) stay structural.
+	if strings.HasPrefix(bodyContent, `\item`) {
+		rest := bodyContent[5:]
+		if rest == "" || !isAlpha(rest[0]) {
+			return kindItem
+		}
 		return kindStruct
 	}
 
@@ -472,7 +487,8 @@ func excludedRanges(s string) [][2]int {
 		}
 	}
 
-	// Ref-like \command{...} groups.
+	// Ref-like \command{...} groups, plus inline verbatim (\verb, \lstinline)
+	// whose content must survive byte-for-byte.
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\\' {
 			continue
@@ -482,6 +498,13 @@ func excludedRanges(s string) [][2]int {
 			j++
 		}
 		name := s[i+1 : j]
+		if name == "verb" || name == "lstinline" {
+			if end, ok := scanInlineVerbRange(s, j); ok {
+				ranges = append(ranges, [2]int{i, end})
+				i = end - 1
+			}
+			continue
+		}
 		if !refLikeCmds[name] {
 			continue
 		}
@@ -531,6 +554,85 @@ func excludedRanges(s string) [][2]int {
 		i = k - 1
 	}
 	return ranges
+}
+
+// scanInlineVerbRange consumes an inline-verbatim argument starting right
+// after the command name at position j: optional '*', optional [..] options
+// (\lstinline), then either a {…} group or a <delim>…<delim> pair. Returns
+// the end offset (exclusive) and whether a well-formed argument was found.
+func scanInlineVerbRange(s string, j int) (int, bool) {
+	k := j
+	if k < len(s) && s[k] == '*' {
+		k++
+	}
+	for k < len(s) && s[k] == '[' {
+		depth := 1
+		k++
+		for k < len(s) && depth > 0 {
+			switch s[k] {
+			case '[':
+				depth++
+			case ']':
+				depth--
+			}
+			k++
+		}
+	}
+	if k >= len(s) {
+		return 0, false
+	}
+	delim := s[k]
+	k++
+	if delim == '{' {
+		depth := 1
+		for k < len(s) && depth > 0 {
+			switch s[k] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+			k++
+		}
+		return k, true
+	}
+	for k < len(s) && s[k] != delim {
+		k++
+	}
+	if k < len(s) {
+		k++
+	}
+	return k, true
+}
+
+// collapseInteriorSpaces rewrites runs of 2+ spaces/tabs in reflowed prose
+// into a single space. Runs inside excluded ranges (inline math, ref-like
+// commands, inline verbatim) and runs preceded by a backslash (an escaped
+// space "\ ") are kept byte-for-byte.
+func collapseInteriorSpaces(s string) string {
+	excluded := excludedRanges(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c != ' ' && c != '\t' {
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+		if j-i >= 2 && !rangeOverlapsAny(i, j, excluded) && !(i > 0 && s[i-1] == '\\') {
+			b.WriteByte(' ')
+		} else {
+			b.WriteString(s[i:j])
+		}
+		i = j
+	}
+	return b.String()
 }
 
 func rangeOverlapsAny(start, end int, ranges [][2]int) bool {

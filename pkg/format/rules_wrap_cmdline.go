@@ -4,19 +4,24 @@ import (
 	"bytes"
 )
 
-// computeCommandOnlyMask returns a 1-indexed mask of length nLines+2.
-// mask[L] == true iff line L belongs to a "command-only paragraph" — a
+// computeCommandOnlyMask returns two 1-indexed masks of length nLines+2.
+// cmdMask[L] == true iff line L belongs to a "command-only paragraph" — a
 // line at indent 0 whose content is one or more complete \name[opt]?{...}*
 // invocations (possibly followed by a trailing comment), or a continuation
 // line inside such an invocation's still-open brace.
+//
+// mathMask[L] == true iff line L starts inside a display-math environment
+// (\begin{equation}… or \[…\]). Such lines are hand-laid math — the wrap
+// rule must never join or split them (math content is handled by the math
+// rules).
 //
 // Math-environment lines are excluded from being a NEW command-only-paragraph
 // start (math content is handled by the math rules). Continuation lines are
 // still marked even if their interior opens a math environment, because the
 // outer command (e.g. \caption{...}) is still hand-laid layout.
-func computeCommandOnlyMask(ctx *Ctx, nLines int) []bool {
+func computeCommandOnlyMask(ctx *Ctx, nLines int) (cmdMask, mathMask []bool) {
 	if nLines < 1 {
-		return nil
+		return nil, nil
 	}
 	src := ctx.Src
 
@@ -108,6 +113,21 @@ func computeCommandOnlyMask(ctx *Ctx, nLines int) []bool {
 					continue
 				}
 			}
+			// Display-math fences \[ and \]. A `\\[2mm]` row break never
+			// reaches here: its leading `\\` pair is consumed by the
+			// generic-escape branch below on the previous iteration.
+			if i+1 < len(src) && src[i+1] == '[' {
+				math++
+				i += 2
+				continue
+			}
+			if i+1 < len(src) && src[i+1] == ']' {
+				if math > 0 {
+					math--
+				}
+				i += 2
+				continue
+			}
 			// Generic escape: skip the backslash and the following byte
 			// (but never cross a newline boundary).
 			if i+1 < len(src) && src[i+1] != '\n' {
@@ -130,6 +150,11 @@ func computeCommandOnlyMask(ctx *Ctx, nLines int) []bool {
 		default:
 			i++
 		}
+	}
+
+	mathMask = make([]bool, nLines+2)
+	for L := 1; L <= nLines; L++ {
+		mathMask[L] = mathAtStart[L] > 0
 	}
 
 	// Pass 2: walk lines, mark command-only-paragraph members.
@@ -168,7 +193,7 @@ func computeCommandOnlyMask(ctx *Ctx, nLines int) []bool {
 			paraStartDepth = 0
 		}
 	}
-	return mask
+	return mask, mathMask
 }
 
 // isMathEnvName reports whether name is one of the LaTeX environments whose
