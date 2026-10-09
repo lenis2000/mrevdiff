@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestTexPartOfBuild pins the fix for lmkf's directory-scoped watcher: the
-// status file is keyed by directory, so every .tex beside a watched main file
+// TestTexPartOfBuild pins the fix for lmkf's directory-scoped watcher: a
+// watcher is matched by directory, so every .tex beside a watched main file
 // looked watched. A sibling the main file never \inputs (referee response,
 // slides) would then adopt the main file's PDF and block every rebuild.
 func TestTexPartOfBuild(t *testing.T) {

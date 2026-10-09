@@ -5,33 +5,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-// lmkfTestEnv redirects the wire-protocol directories to a temp root and
-// shrinks the poll/settle timings so the wait tests run fast.
-func lmkfTestEnv(t *testing.T) (statusDir, locksDir string) {
+// lmkfTestEnv redirects the lock registry to a temp root and shrinks the
+// poll/settle timings so the wait tests run fast.
+func lmkfTestEnv(t *testing.T) (locksDir string) {
 	t.Helper()
-	root := t.TempDir()
-	statusDir = filepath.Join(root, "lmkf-status")
-	locksDir = filepath.Join(root, "lmk-locks")
-	if err := os.MkdirAll(statusDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	locksDir = filepath.Join(t.TempDir(), "lmk-locks")
 	if err := os.MkdirAll(locksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	origStatus, origLocks := lmkfStatusDir, lmkLocksDir
+	origLocks := lmkLocksDir
 	origPoll, origSettle := lmkfPollInterval, lmkfSettleWindow
-	lmkfStatusDir, lmkLocksDir = statusDir, locksDir
+	lmkLocksDir = locksDir
 	lmkfPollInterval = 10 * time.Millisecond
 	lmkfSettleWindow = 150 * time.Millisecond
 	t.Cleanup(func() {
-		lmkfStatusDir, lmkLocksDir = origStatus, origLocks
+		lmkLocksDir = origLocks
 		lmkfPollInterval, lmkfSettleWindow = origPoll, origSettle
 	})
-	return statusDir, locksDir
+	return locksDir
 }
 
 func writeLmkLock(t *testing.T, texPath string, pid int, cmd string) {
@@ -44,6 +40,9 @@ func writeLmkLock(t *testing.T, texPath string, pid int, cmd string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(lock, "cmd"), []byte(cmd+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lock, "file"), []byte(canonicalPath(texPath)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -63,7 +62,7 @@ func deadPID(t *testing.T) int {
 	return pid
 }
 
-func lmkfProject(t *testing.T, statusDir string) (texPath, logPath string) {
+func lmkfProject(t *testing.T) (texPath, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	texPath = filepath.Join(dir, "paper.tex")
@@ -71,35 +70,31 @@ func lmkfProject(t *testing.T, statusDir string) (texPath, logPath string) {
 	if err := os.WriteFile(texPath, []byte("\\documentclass{article}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	statusFile := filepath.Join(statusDir, filepath.Base(dir))
-	if err := os.WriteFile(statusFile, []byte(logPath+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	return texPath, logPath
 }
 
 func TestLmkfWatchingRequiresLiveLock(t *testing.T) {
-	statusDir, _ := lmkfTestEnv(t)
-	texPath, _ := lmkfProject(t, statusDir)
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
 
 	if LmkfWatching(texPath) {
-		t.Fatalf("status file without any lock must not count as watching")
+		t.Fatalf("no lock must not count as watching")
 	}
 
 	writeLmkLock(t, texPath, deadPID(t), "lmkf")
 	if LmkfWatching(texPath) {
-		t.Fatalf("status file with a dead lock pid must not count as watching")
+		t.Fatalf("a dead lock pid must not count as watching")
 	}
 
 	writeLmkLock(t, texPath, os.Getpid(), "lmkf")
 	if !LmkfWatching(texPath) {
-		t.Fatalf("status file + live lock should count as watching")
+		t.Fatalf("a live lmkf lock should count as watching")
 	}
 }
 
 func TestLmkfWatchForAdoptsProjectMainFile(t *testing.T) {
-	statusDir, _ := lmkfTestEnv(t)
-	texPath, _ := lmkfProject(t, statusDir)
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
 	writeLmkLock(t, texPath, os.Getpid(), "lmkf")
 
 	subfile := filepath.Join(filepath.Dir(texPath), "section2.tex")
@@ -123,12 +118,12 @@ func TestLmkfWatchForAdoptsProjectMainFile(t *testing.T) {
 }
 
 func TestLmkfWatchForRejectsForeignDirectory(t *testing.T) {
-	statusDir, _ := lmkfTestEnv(t)
-	texPath, _ := lmkfProject(t, statusDir)
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
 	writeLmkLock(t, texPath, os.Getpid(), "lmkf")
 
-	// A same-basename project directory elsewhere collides on the status
-	// key but its log lives in the other directory.
+	// A same-basename project directory elsewhere must not borrow the
+	// watcher of this one.
 	otherRoot := t.TempDir()
 	otherDir := filepath.Join(otherRoot, filepath.Base(filepath.Dir(texPath)))
 	if err := os.MkdirAll(otherDir, 0o755); err != nil {
@@ -139,7 +134,7 @@ func TestLmkfWatchForRejectsForeignDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := LmkfWatchFor(otherTex); ok {
-		t.Fatalf("status file pointing into a different directory must be ignored")
+		t.Fatalf("a watcher in a different directory must be ignored")
 	}
 }
 
@@ -270,7 +265,7 @@ func TestWaitTimesOutWithoutAnyPass(t *testing.T) {
 }
 
 func TestAcquireLmkBuildLock(t *testing.T) {
-	_, _ = lmkfTestEnv(t)
+	lmkfTestEnv(t)
 	dir := t.TempDir()
 	texPath := filepath.Join(dir, "paper.tex")
 	if err := os.WriteFile(texPath, []byte("x"), 0o644); err != nil {
@@ -293,4 +288,90 @@ func TestAcquireLmkBuildLock(t *testing.T) {
 		t.Fatalf("dead lock should be taken over")
 	}
 	release()
+}
+
+func TestLmkfWatchForIgnoresOneShotHolder(t *testing.T) {
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
+	writeLmkLock(t, texPath, os.Getpid(), "lmk")
+	if _, ok := LmkfWatchFor(texPath); ok {
+		t.Fatalf("a one-shot lmk lock is not a -pvc watcher")
+	}
+}
+
+func TestLmkfWatchForPrefersExactMainFile(t *testing.T) {
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
+	other := filepath.Join(filepath.Dir(texPath), "response.tex")
+	if err := os.WriteFile(other, []byte("\\documentclass{article}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeLmkLock(t, other, os.Getpid(), "lmkf")
+	writeLmkLock(t, texPath, os.Getpid(), "lmkf")
+	if !LmkfWatching(texPath) || !LmkfWatching(other) {
+		t.Fatalf("each watched main file should report its own watcher")
+	}
+}
+
+// TestLmkfWatchForSymlinkedChapter pins a chapter that is a symlink into
+// another directory: it belongs to the project it is reviewed from, not to
+// the directory its target lives in.
+func TestLmkfWatchForSymlinkedChapter(t *testing.T) {
+	lmkfTestEnv(t)
+	texPath, _ := lmkfProject(t)
+	writeLmkLock(t, texPath, os.Getpid(), "lmkf")
+
+	shared := filepath.Join(t.TempDir(), "chapter.tex")
+	if err := os.WriteFile(shared, []byte("\\section{Shared}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chapter := filepath.Join(filepath.Dir(texPath), "chapter.tex")
+	if err := os.Symlink(shared, chapter); err != nil {
+		t.Fatal(err)
+	}
+	fls := strings.TrimSuffix(texPath, ".tex") + ".fls"
+	if err := os.WriteFile(fls, []byte("PWD "+filepath.Dir(texPath)+"\nINPUT paper.tex\nINPUT chapter.tex\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	watch, ok := LmkfWatchFor(chapter)
+	if !ok {
+		t.Fatalf("a symlinked chapter should see its project's watcher")
+	}
+	if watch.MainTex != texPath {
+		t.Fatalf("MainTex = %q, want %q", watch.MainTex, texPath)
+	}
+}
+
+// TestLmkfWatchForDirectorySpelledDifferently pins a reviewed path typed
+// with a directory spelling the disk does not have, in case or in Unicode
+// normalisation: the lock records the on-disk spelling (zsh's ${path:A}),
+// and the two must still match.
+func TestLmkfWatchForDirectorySpelledDifferently(t *testing.T) {
+	for _, tc := range []struct{ desc, onDisk, typed string }{
+		{"case", "RealCase", "realcase"},
+		{"normalisation", "\u0441\u0442\u0430\u0442\u044c\u0438\u0306", "\u0441\u0442\u0430\u0442\u044c\u0439"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			lmkfTestEnv(t)
+			root := t.TempDir()
+			dir := filepath.Join(root, tc.onDisk)
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			texPath := filepath.Join(dir, "paper.tex")
+			if err := os.WriteFile(texPath, []byte("\\documentclass{article}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			typed := filepath.Join(root, tc.typed, "paper.tex")
+			if _, err := os.Stat(typed); err != nil {
+				t.Skipf("the temp volume tells the two spellings apart: %v", err)
+			}
+			writeLmkLock(t, texPath, os.Getpid(), "lmkf")
+
+			if !LmkfWatching(typed) {
+				t.Fatalf("a differently spelled path to the watched file should report watching")
+			}
+		})
+	}
 }

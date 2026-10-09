@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -92,16 +93,42 @@ const agtermIcon = "📕"
 
 // agtermMarkedName is the name pushed to agterm at startup, "" when the
 // session was left alone; agtermOrigName is the name to put back on exit.
+// It is "" when the session had no custom name: a blank rename clears the
+// custom name and hands the label back to agterm, where putting the startup
+// label back would pin it as a custom name. Both are kept without their
+// sidebar decoration.
 var (
 	agtermMarkedName string
 	agtermOrigName   string
 )
 
-// sidebarDecoration matches what agterm prefixes to the name it reports: the
-// "⌘3 " / "3· " position marker and a "[03]" activity counter. Both are display
-// text rather than part of the name, so they have to come off before the name
-// can be handed back to a rename — otherwise a restore bakes them in.
-var sidebarDecoration = regexp.MustCompile(`^(?:(?:⌘\d+|\d+·)\s+)?(?:\[\d+\]\s+)?`)
+// sidebarDecoration matches the run a sidebar-numbering hook keeps in front of
+// a custom name and rewrites on every tree change: the "3· " (formerly "⌘3 ")
+// tab number, the "■ " / "□ " scratch marker and an old "[03]" counter,
+// doubled ones included. Names are compared without it, and every rename keeps
+// the one the session carries now: a restored name that lost its number and
+// equals the cwd basename would pass for agterm's own label, which the hook
+// never numbers.
+var sidebarDecoration = regexp.MustCompile(`^(?:(?:\d+[·⋅│]|⌘\d+)(?:\s+|$)|[■□]\s*|\[\d+\]\s*)+`)
+
+var (
+	sidebarNumber = regexp.MustCompile(`\d+[·⋅│]|⌘\d+`)
+	sidebarMarker = regexp.MustCompile(`[■□]`)
+)
+
+// splitSidebarName splits a tree name into its decoration, cut down to one
+// tab number and one scratch marker, and the name proper.
+func splitSidebarName(name string) (prefix, body string) {
+	name = strings.TrimSpace(name)
+	deco := sidebarDecoration.FindString(name)
+	if n := sidebarNumber.FindString(deco); n != "" {
+		prefix = n + " "
+	}
+	if m := sidebarMarker.FindString(deco); m != "" {
+		prefix += m + " "
+	}
+	return prefix, strings.TrimSpace(name[len(deco):])
+}
 
 // AgtermMarkSession prefixes the session's own name with the book icon and
 // leaves the rest of it alone: a session the user named after the paper keeps
@@ -120,13 +147,17 @@ func AgtermMarkSession() {
 	if pane := os.Getenv("AGTERM_PANE"); pane != "" && pane != "left" {
 		return
 	}
-	name := agtermSessionName()
+	raw, auto := agtermSessionName()
+	prefix, name := splitSidebarName(raw)
 	if name == "" || strings.HasPrefix(name, agtermIcon) {
 		return
 	}
 	agtermOrigName = name
+	if auto {
+		agtermOrigName = ""
+	}
 	agtermMarkedName = agtermIcon + " " + name
-	_ = agtermRun("session", "rename", agtermMarkedName, "--target", agtermSession)
+	_ = agtermRun("session", "rename", prefix+agtermMarkedName, "--target", agtermSession)
 }
 
 // AgtermRestoreSessionName drops the icon again when the review exits. The
@@ -136,42 +167,78 @@ func AgtermRestoreSessionName() {
 	if agtermMarkedName == "" || !agtermAvailable() {
 		return
 	}
-	if agtermSessionName() == agtermMarkedName {
-		_ = agtermRun("session", "rename", agtermOrigName, "--target", agtermSession)
+	raw, _ := agtermSessionName()
+	if prefix, name := splitSidebarName(raw); name == agtermMarkedName {
+		restore := ""
+		if agtermOrigName != "" {
+			restore = prefix + agtermOrigName
+		}
+		_ = agtermRun("session", "rename", restore, "--target", agtermSession)
 	}
 	agtermMarkedName, agtermOrigName = "", ""
 }
 
-// agtermSessionName reads this session's current name out of the tree.
-// Returns "" when agterm cannot be reached or does not know the session.
-func agtermSessionName() string {
-	out, err := agtermOutput("tree", "--json")
+// agtermSessionName reads this session's current name out of the tree, and
+// whether agterm derived it rather than a rename setting it. Returns "" when
+// agterm cannot be reached or does not know the session.
+func agtermSessionName() (string, bool) {
+	// The tree covers one window, the frontmost unless one is named, and the
+	// user may have raised another window by the time the review exits.
+	args := []string{"tree", "--json"}
+	if w := strings.TrimSpace(os.Getenv("AGTERM_WINDOW_ID")); w != "" {
+		args = append(args, "--window", w)
+	}
+	out, err := agtermOutput(args...)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var tree struct {
 		Result struct {
 			Tree struct {
 				Workspaces []struct {
-					Sessions []struct {
-						ID   string `json:"id"`
-						Name string `json:"name"`
-					} `json:"sessions"`
+					Sessions []agtermTreeSession `json:"sessions"`
 				} `json:"workspaces"`
 			} `json:"tree"`
 		} `json:"result"`
 	}
 	if json.Unmarshal(out, &tree) != nil {
-		return ""
+		return "", false
 	}
 	for _, ws := range tree.Result.Tree.Workspaces {
 		for _, s := range ws.Sessions {
 			if strings.EqualFold(s.ID, agtermSession) {
-				return strings.TrimSpace(sidebarDecoration.ReplaceAllString(s.Name, ""))
+				return strings.TrimSpace(s.Name), s.autoNamed()
 			}
 		}
 	}
-	return ""
+	return "", false
+}
+
+// agtermTreeSession is the part of a tree session node the name logic reads.
+type agtermTreeSession struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Title        string `json:"title"`
+	Cwd          string `json:"cwd"`
+	SplitFocused bool   `json:"splitFocused"`
+}
+
+// autoNamed reports whether the session has no custom name: agterm then
+// labels it with the focused pane's OSC title, or with that pane's cwd
+// basename while there is no title. The tree carries only the main pane's
+// title and cwd, so a session focused on its split pane never counts.
+func (s agtermTreeSession) autoNamed() bool {
+	name := strings.TrimSpace(s.Name)
+	if name == "" || s.SplitFocused {
+		return false
+	}
+	if title := strings.TrimSpace(s.Title); title != "" {
+		return name == title
+	}
+	if s.Cwd == "" {
+		return name == "~"
+	}
+	return name == filepath.Base(s.Cwd)
 }
 
 // syncAgtermFlag reconciles the desired flag state after an Update pass

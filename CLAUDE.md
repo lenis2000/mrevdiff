@@ -34,8 +34,9 @@ mreview in any way** (no `mreview/` imports, no `MREVIEW_*` env vars, no
   git refs from the tool.
 - Editing must only write `Review.New.Path`, and only when
   `--allow-modifications` is set and the new endpoint is a real file.
-- The lmkf wire protocol (`/tmp/lmkf-status/<project>`, log marker
-  "Here is how much of TeX") is an external contract — never rename it.
+- The lmkf wire protocol (a live `/tmp/lmk-locks/*.lock` whose cmd is
+  lmkf, from `~/.vim/lmk-guard.sh`; log marker "Here is how much of TeX")
+  is an external contract — never rename it.
   When lmkf watches a paper, the tool must not run its own latexmk.
 - `S` opens Skim forward-search only; it must never trigger compilation.
 - The `pdfverify` build tag gates the paranoid pixel verifier (needs

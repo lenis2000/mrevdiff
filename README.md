@@ -142,10 +142,11 @@ When mrevdiff runs inside [agterm](https://github.com/umputun/agterm)
 
 mrevdiff never races the build pipeline: when
 [lmkf](https://github.com/lenis2000) (`latexmk -pvc` wrapper) is already
-watching the paper — detected via `/tmp/lmkf-status/<project>` — the tool
-skips its own build entirely and waits for lmkf's pass to finish after
-each edit. Without lmkf it runs `latexmk` itself (configurable with
-`--build-cmd` / `build_cmd`; `--no-build` disables).
+watching the paper — detected via a live `/tmp/lmk-locks/*.lock` whose
+cmd is lmkf (`~/.vim/lmk-guard.sh`) — the tool skips its own build
+entirely and waits for lmkf's pass to finish after each edit. Without
+lmkf it runs `latexmk` itself (configurable with `--build-cmd` /
+`build_cmd`; `--no-build` disables).
 
 ## Configuration
 

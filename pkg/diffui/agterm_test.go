@@ -1,9 +1,11 @@
 package diffui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -33,24 +35,61 @@ func forceAgterm(t *testing.T) *[][]string {
 	return &calls
 }
 
-// forceAgtermTree stubs the tree read behind agtermSessionName with a name
-// that the recording rename stub keeps current, so mark/restore can be driven
-// end to end. It also clears the mark globals before and after the test.
+// fakeAgtermSession holds what agterm derives a session's tree name from:
+// the custom name a rename sets (blank clears it), else the main pane's OSC
+// title, else its cwd basename.
+type fakeAgtermSession struct {
+	custom, title, cwd string
+	splitFocused       bool
+	splitTitle         string
+}
+
+func (s *fakeAgtermSession) treeName() string {
+	switch {
+	case s.custom != "":
+		return s.custom
+	case s.splitFocused:
+		return s.splitTitle
+	case s.title != "":
+		return s.title
+	case s.cwd == "":
+		return "~"
+	}
+	return filepath.Base(s.cwd)
+}
+
+// forceAgtermTree stubs the tree read behind agtermSessionName with a session
+// whose custom name is name; the returned pointer is that custom name, which
+// the recording rename stub keeps current, so mark/restore can be driven end
+// to end. It also clears the mark globals before and after the test.
 func forceAgtermTree(t *testing.T, name string) *string {
+	t.Helper()
+	return &forceAgtermSession(t, fakeAgtermSession{custom: name}).custom
+}
+
+// forceAgtermSession is forceAgtermTree for a session described in full.
+func forceAgtermSession(t *testing.T, fake fakeAgtermSession) *fakeAgtermSession {
 	t.Helper()
 	_ = forceAgterm(t)
 	t.Setenv("AGTERM_PANE", "") // the review speaks for the session
-	current := name
+	s := &fake
 	savedOutput := agtermOutput
 	agtermOutput = func(args ...string) ([]byte, error) {
-		return []byte(fmt.Sprintf(
-			`{"result":{"tree":{"workspaces":[{"sessions":[{"id":"test-session-uuid","name":%q}]}]}}}`,
-			current)), nil
+		node := map[string]any{"id": "test-session-uuid", "name": s.treeName(), "cwd": s.cwd}
+		if s.title != "" {
+			node["title"] = s.title
+		}
+		if s.splitFocused {
+			node["splitFocused"] = true
+		}
+		tree := map[string]any{"result": map[string]any{"tree": map[string]any{
+			"workspaces": []any{map[string]any{"sessions": []any{node}}}}}}
+		return json.Marshal(tree)
 	}
 	savedRun := agtermRun
 	agtermRun = func(args ...string) error {
 		if len(args) >= 3 && args[0] == "session" && args[1] == "rename" {
-			current = args[2]
+			s.custom = strings.TrimSpace(args[2])
 		}
 		return savedRun(args...)
 	}
@@ -59,23 +98,132 @@ func forceAgtermTree(t *testing.T, name string) *string {
 		agtermOutput = savedOutput
 		agtermMarkedName, agtermOrigName = "", ""
 	})
-	return &current
+	return s
 }
 
 // TestAgtermSessionIconMarksAndRestores pins the sidebar mark: the review
-// prefixes the icon onto the name the session already had — keeping the rest
-// of it — and hands that name back on exit.
+// puts the icon between the sidebar's tab number and the name the session
+// already had — keeping both — and hands the numbered name back on exit.
 func TestAgtermSessionIconMarksAndRestores(t *testing.T) {
 	name := forceAgtermTree(t, "3· SIGMA")
 
 	AgtermMarkSession()
-	if *name != agtermIcon+" SIGMA" {
-		t.Fatalf("mark should prefix the icon onto the undecorated name, got %q", *name)
+	if *name != "3· "+agtermIcon+" SIGMA" {
+		t.Fatalf("mark should put the icon after the tab number, got %q", *name)
 	}
 
 	AgtermRestoreSessionName()
-	if *name != "SIGMA" {
-		t.Fatalf("exit should hand the original name back, got %q", *name)
+	if *name != "3· SIGMA" {
+		t.Fatalf("exit should hand the numbered name back, got %q", *name)
+	}
+}
+
+var (
+	hookNumber = regexp.MustCompile(`^(?:\d+[·⋅│]|⌘\d+)(?:\s+|$)`)
+	hookMarker = regexp.MustCompile(`^[■□]\s*`)
+	hookClock  = regexp.MustCompile(`^\[\d{1,2}\]\s*`)
+)
+
+// sidebarHook relabels the fake the way the hook pass of ~/.vim/agterm/
+// agterm-sidebar.sh does on a tree change: an unnumbered name agterm derived
+// itself is left alone; any other name is re-prefixed with tab number n and
+// the scratch marker ("■ ", "□ " or ""), keeping the body after one run of
+// numbers, one marker and one counter.
+func sidebarHook(s *fakeAgtermSession, n int, marker string) {
+	name := s.treeName()
+	if !hookNumber.MatchString(name) && (name == s.title || name == "~" || name == filepath.Base(s.cwd)) {
+		return
+	}
+	body := name
+	for b := hookNumber.ReplaceAllString(body, ""); b != body; b = hookNumber.ReplaceAllString(body, "") {
+		body = b
+	}
+	body = strings.TrimSpace(hookClock.ReplaceAllString(hookMarker.ReplaceAllString(body, ""), ""))
+	s.custom = strings.TrimRight(fmt.Sprintf("%d· %s%s", n, marker, body), " ")
+}
+
+// TestAgtermSessionIconSurvivesSidebarHook pins mark and restore against the
+// sidebar hook, which rewrites the tab number and scratch marker in front of
+// every custom name whenever the tree changes: the mark keeps the decoration
+// so the hook has nothing to add, the exit still recognises its mark after the
+// hook moved the number or the marker, the restored name keeps the current
+// decoration, and nothing doubles up over repeated reviews.
+func TestAgtermSessionIconSurvivesSidebarHook(t *testing.T) {
+	for _, tc := range []struct {
+		desc   string
+		fake   fakeAgtermSession
+		marked string
+		n      int    // tab number during the review
+		marker string // scratch marker during the review
+		want   string
+	}{
+		{"hidden scratch", fakeAgtermSession{custom: "2· □ SIGMA", title: "zsh", cwd: "/w/paper"},
+			"2· □ 📕 SIGMA", 2, "□ ", "2· □ SIGMA"},
+		{"scratch opened mid-review", fakeAgtermSession{custom: "2· SIGMA", title: "zsh", cwd: "/w/paper"},
+			"2· 📕 SIGMA", 2, "□ ", "2· □ SIGMA"},
+		{"scratch closed mid-review", fakeAgtermSession{custom: "2· ■ SIGMA", title: "zsh", cwd: "/w/paper"},
+			"2· ■ 📕 SIGMA", 2, "", "2· SIGMA"},
+		{"tab moved", fakeAgtermSession{custom: "4· SIGMA", title: "zsh", cwd: "/w/paper"},
+			"4· 📕 SIGMA", 1, "", "1· SIGMA"},
+		{"unnumbered custom name", fakeAgtermSession{custom: "SIGMA", title: "zsh", cwd: "/w/paper"},
+			"📕 SIGMA", 3, "", "3· SIGMA"},
+		{"doubled decoration", fakeAgtermSession{custom: "2· □ 2· □ SIGMA", title: "zsh", cwd: "/w/paper"},
+			"2· □ 📕 SIGMA", 2, "□ ", "2· □ SIGMA"},
+		{"numbered name equal to the cwd basename", fakeAgtermSession{custom: "1· zzrevx", cwd: "/w/zzrevx"},
+			"1· 📕 zzrevx", 1, "", "1· zzrevx"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			s := forceAgtermSession(t, tc.fake)
+			for run := 1; run <= 2; run++ {
+				AgtermMarkSession()
+				if run == 1 && s.custom != tc.marked {
+					t.Fatalf("mark: got %q, want %q", s.custom, tc.marked)
+				}
+				sidebarHook(s, tc.n, tc.marker)
+				AgtermRestoreSessionName()
+				if s.custom != tc.want {
+					t.Fatalf("run %d: exit left %q, want %q", run, s.custom, tc.want)
+				}
+				sidebarHook(s, tc.n, tc.marker)
+				if s.custom != tc.want {
+					t.Fatalf("run %d: the hook relabelled the restored name to %q", run, s.custom)
+				}
+			}
+		})
+	}
+}
+
+// TestAgtermSessionIconLeavesHookedMarkAlone pins the nested review once the
+// hook has decorated the outer one's mark: the inner review sees the icon
+// behind the decoration and leaves the session alone.
+func TestAgtermSessionIconLeavesHookedMarkAlone(t *testing.T) {
+	name := forceAgtermTree(t, "2· □ "+agtermIcon+" SIGMA")
+
+	AgtermMarkSession()
+	AgtermRestoreSessionName()
+	if *name != "2· □ "+agtermIcon+" SIGMA" {
+		t.Fatalf("an already-marked session must be left untouched, got %q", *name)
+	}
+}
+
+// TestAgtermSessionNameReadsOwnWindow pins the tree read to the window the
+// review runs in: without --window agtermctl reads the frontmost window, which
+// need not hold this session by the time the review exits.
+func TestAgtermSessionNameReadsOwnWindow(t *testing.T) {
+	t.Setenv("AGTERM_WINDOW_ID", "WINDOW-1")
+	_ = forceAgtermTree(t, "SIGMA")
+	stub := agtermOutput
+	var got []string
+	agtermOutput = func(args ...string) ([]byte, error) {
+		got = args
+		return stub(args...)
+	}
+
+	if name, _ := agtermSessionName(); name != "SIGMA" {
+		t.Fatalf("tree read returned %q", name)
+	}
+	if strings.Join(got, " ") != "tree --json --window WINDOW-1" {
+		t.Fatalf("tree read should name the session's window, got %q", got)
 	}
 }
 
@@ -102,6 +250,66 @@ func TestAgtermSessionIconKeepsUserRename(t *testing.T) {
 	AgtermRestoreSessionName()
 	if *name != "renamed by hand" {
 		t.Fatalf("a mid-review rename is the user's to keep, got %q", *name)
+	}
+}
+
+// TestAgtermSessionIconClearsDerivedName pins the restore of a session that
+// had no custom name: exit clears the icon name with a blank rename, so the
+// label follows the live title again rather than being pinned to the label
+// the review started under.
+func TestAgtermSessionIconClearsDerivedName(t *testing.T) {
+	for _, tc := range []struct {
+		desc string
+		fake fakeAgtermSession
+	}{
+		{"title", fakeAgtermSession{title: "mrevdiff paper.tex", cwd: "/work/paper"}},
+		{"cwd basename", fakeAgtermSession{cwd: "/work/paper"}},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			s := forceAgtermSession(t, tc.fake)
+			label := s.treeName()
+
+			AgtermMarkSession()
+			if s.custom != agtermIcon+" "+label {
+				t.Fatalf("mark should prefix the icon onto the derived label, got %q", s.custom)
+			}
+
+			AgtermRestoreSessionName()
+			if s.custom != "" {
+				t.Fatalf("exit must clear the custom name, not pin %q", s.custom)
+			}
+			s.title = "zsh"
+			if got := s.treeName(); got != "zsh" {
+				t.Fatalf("the label should follow the live title after exit, got %q", got)
+			}
+		})
+	}
+}
+
+// TestAgtermSessionIconKeepsCustomNameMatchingCwd pins that only a name agterm
+// itself shows counts as derived: a custom name that happens to equal the cwd
+// basename, on a session that has a title, is a rename and is handed back.
+func TestAgtermSessionIconKeepsCustomNameMatchingCwd(t *testing.T) {
+	s := forceAgtermSession(t, fakeAgtermSession{custom: "paper", title: "zsh", cwd: "/work/paper"})
+
+	AgtermMarkSession()
+	AgtermRestoreSessionName()
+	if s.custom != "paper" {
+		t.Fatalf("a custom name must be handed back, got %q", s.custom)
+	}
+}
+
+// TestAgtermSessionIconPinsSplitFocusedName pins the fallback when the tree
+// cannot tell: the split pane's title is not in the tree, so a session
+// focused on its split keeps the old restore by name.
+func TestAgtermSessionIconPinsSplitFocusedName(t *testing.T) {
+	s := forceAgtermSession(t, fakeAgtermSession{title: "zsh", cwd: "/work/paper",
+		splitFocused: true, splitTitle: "vim"})
+
+	AgtermMarkSession()
+	AgtermRestoreSessionName()
+	if s.custom != "vim" {
+		t.Fatalf("an undecidable name must be restored by name, got %q", s.custom)
 	}
 }
 

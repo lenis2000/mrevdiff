@@ -383,8 +383,8 @@ func pdfReviewFixture(t *testing.T) (*diffreview.Review, string, string) {
 	}, oldPath, newPath
 }
 
-// fakeLmkfWatcher registers texPath as lmkf-watched (status file + live
-// lock) and shrinks the wait timings so reload tests run fast.
+// fakeLmkfWatcher registers texPath as lmkf-watched (a live lmk-guard lock
+// with cmd lmkf) and shrinks the wait timings so reload tests run fast.
 func fakeLmkfWatcher(t *testing.T, texPath string) {
 	t.Helper()
 	cleanup, err := ui.FakeLmkfWatcherForTest(texPath)
